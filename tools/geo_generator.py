@@ -24,17 +24,24 @@ Physical Curve("BEAM") = {{1}};
 
 @tool("generate_geo", return_direct=False)
 def generate_geo_tool(
-    length_m: float = 3.0, n_elems: int = 10, geo_path: str = "model.geo"
+    length_m: float = 3.0,
+    n_elems: int | None = None,
+    geo_path: str = "model.geo",
 ) -> str:
     """
     Generate a minimal 1D beam .geo file for Gmsh with BASE/TIP/BEAM groups.
     Mesh density is controlled by the number of elements (n_elems).
     - length_m > 0
-    - n_elems >= 1
+    - n_elems >= 1 (if not given, estimated from length)
     """
     # --- validation ---
     if length_m <= 0:
         return "Error: length_m must be > 0."
+
+    # estimate number of elements if not provided
+    if n_elems is None:
+        n_elems = max(2, int(length_m / 0.2))  # roughly 1 element per 0.2 m
+
     if n_elems < 1:
         return "Error: n_elems must be >= 1."
 
@@ -45,7 +52,7 @@ def generate_geo_tool(
         f.write(content)
 
     return (
-        f"Generated {geo_path} "
-        f"(L={length_m} m, n_elems={n_elems}, n_nodes={n_nodes}).\n"
-        "Physicals: BASE (node 1), TIP (node 2), BEAM (line 1)."
+        f"✅ Generated {geo_path}\n"
+        f"Length = {length_m} m, Elements = {n_elems}, Nodes = {n_nodes}\n"
+        "Groups: BASE (1), TIP (2), BEAM (1)"
     )
