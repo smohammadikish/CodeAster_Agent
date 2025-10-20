@@ -1,5 +1,13 @@
 # tools/geo_generator.py
+import os
+
 from langchain.tools import tool
+
+WORKSPACE = "workspace"
+try:
+    os.makedirs(WORKSPACE, exist_ok=True)
+except FileExistsError:
+    pass
 
 GEO_TEMPLATE = """// Simple 1D beam geometry (OpenCASCADE)
 SetFactory("OpenCASCADE");
@@ -26,7 +34,7 @@ Physical Curve("BEAM") = {{1}};
 def generate_geo_tool(
     length_m: float = 3.0,
     n_elems: int | None = None,
-    geo_path: str = "model.geo",
+    geo_name: str = "model.geo",
 ) -> str:
     """
     Generate a minimal 1D beam .geo file for Gmsh with BASE/TIP/BEAM groups.
@@ -46,13 +54,14 @@ def generate_geo_tool(
         return "Error: n_elems must be >= 1."
 
     n_nodes = n_elems + 1
+    geo_path = os.path.join(WORKSPACE, geo_name)
     content = GEO_TEMPLATE.format(length=length_m, n_nodes=n_nodes)
 
     with open(geo_path, "w") as f:
         f.write(content)
 
     return (
-        f"✅ Generated {geo_path}\n"
+        f"✅ Generated {geo_name}\n"
         f"Length = {length_m} m, Elements = {n_elems}, Nodes = {n_nodes}\n"
         "Groups: BASE (1), TIP (2), BEAM (1)"
     )
