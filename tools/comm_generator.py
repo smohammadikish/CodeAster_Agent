@@ -1,5 +1,6 @@
 # tools/comm_generator.py
 import os
+
 from langchain.tools import tool
 
 WORKSPACE = "workspace"
@@ -67,15 +68,16 @@ IMPR_RESU(
 FIN();
 """
 
+
 @tool("generate_comm", return_direct=False)
 def generate_comm_tool(
     med_name: str = "model.med",
     comm_name: str = "model.comm",
-    E: float = 11e9,      # Pa
+    E: float = 11e9,  # Pa
     NU: float = 0.3,
-    RHO: float = 500.0,   # kg/m3
-    HY: float = 0.10,     # m
-    HZ: float = 0.10,     # m
+    RHO: float = 500.0,  # kg/m3
+    HY: float = 0.10,  # m
+    HZ: float = 0.10,  # m
     FY: float = -1000.0,  # N
 ) -> str:
     """

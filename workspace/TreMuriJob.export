@@ -1,0 +1,70 @@
+P actions make_etude
+P debug nodebug
+P memjob 4194304
+P memory_limit 4096.0
+P mode interactif
+P mpi_nbcpu 1
+P mpi_nbnoeud 1
+P ncpus 1
+P nomjob TreMuriJob
+P origine AsterStudy 0.11
+P server localhost
+P time_limit 1800.0
+P tpsjob 32
+P version stable
+A memjeveux 256.0
+A tpmax 1800.0
+F comm TreMuriJob.comm D 1
+F libr TreMuriJob.med D 20
+F libr tbF1dG1.txt R 2
+F libr tbF1dG1pp.txt R 3
+F libr tbF1dG2.txt R 4
+F libr tbF1dQ.txt R 5
+F libr tbF1dQ0.txt R 7
+F libr tbF1dQ1.txt R 8
+F libr tbF1dQ2.txt R 9
+F libr tbDG1.txt R 10
+F libr tbDG1pp.txt R 11
+F libr tbDG2.txt R 12
+F libr tbDQ.txt R 13
+F libr tbDQ0.txt R 14
+F libr tbDQ1.txt R 54
+F libr tbDQ2.txt R 16
+F libr tbRG1.txt R 17
+F libr tbRG1pp.txt R 18
+F libr tbRG2.txt R 19
+F libr tbRQ.txt R 21
+F libr tbRQ0.txt R 22
+F libr tbRQ1.txt R 23
+F libr tbRQ2.txt R 24
+F libr tbF2dG1.txt R 25
+F libr tbF2dG1pp.txt R 26
+F libr tbF2dG2.txt R 27
+F libr tbF2dQ.txt R 28
+F libr tbF2dQ0.txt R 29
+F libr tbF2dQ1.txt R 30
+F libr tbF2dQ2.txt R 31
+F libr tbSBG1.txt R 32
+F libr tbSMG1.txt R 33
+F libr tbSTG1.txt R 34
+F libr tbSBG1pp.txt R 35
+F libr tbSMG1pp.txt R 36
+F libr tbSTG1pp.txt R 37
+F libr tbSBG2.txt R 38
+F libr tbSMG2.txt R 39
+F libr tbSTG2.txt R 40
+F libr tbSBQ.txt R 41
+F libr tbSMQ.txt R 42
+F libr tbSTQ.txt R 43
+F libr tbSBQ0.txt R 44
+F libr tbSMQ0.txt R 45
+F libr tbSTQ0.txt R 46
+F libr tbSBQ1.txt R 47
+F libr tbSMQ1.txt R 48
+F libr tbSTQ1.txt R 49
+F libr tbSBQ2.txt R 50
+F libr tbSMQ2.txt R 51
+F libr tbSTQ2.txt R 52
+F libr tbLCS.txt R 53
+F mess TreMuriJob.log R  6
+R base base-stage1 R  0
