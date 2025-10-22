@@ -3,7 +3,7 @@ import os
 import subprocess
 import shutil
 from langchain.tools import tool
-from env_loader import load_env  # برای خواندن مسیر GMSH_BIN از .env
+from env_loader import load_env  # To read the GMSH_BIN path from .env
 
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
@@ -18,7 +18,7 @@ def mesh_with_gmsh_tool(
     Use Gmsh CLI to mesh a 1D geometry (.geo) and export it to MED format (.med).
     Requires Gmsh to be installed and accessible via PATH or set in .env as GMSH_BIN.
     """
-    gmsh_bin, _ = load_env()  # فقط مسیر gmsh برمی‌گرده، as_run فعلاً استفاده نمی‌شه
+    gmsh_bin, _ = load_env()  # Only returns the gmsh path, as_run is not used for now
     gmsh_path = shutil.which(gmsh_bin)
 
     if gmsh_path is None:
@@ -30,13 +30,13 @@ def mesh_with_gmsh_tool(
     if not os.path.exists(geo_path):
         return f"❌ Error: input file '{geo_path}' not found."
 
-    # دستور Gmsh برای تولید مش 1D و خروجی MED
+    # Gmsh command to generate 1D mesh and MED output
     cmd = [gmsh_path, geo_path, "-1", "-format", "med", "-o", med_path, "-v", "2"]
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
 
-        # بررسی خطا
+        # erore checking
         if result.returncode != 0:
             return f"⚠️ Gmsh failed with error:\n{result.stderr}\n{result.stdout}"
 
