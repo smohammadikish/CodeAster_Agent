@@ -37,25 +37,26 @@ def generate_export_tool(
     comm_name: str = "model.comm",
     med_name: str = "model.med",
     export_name: str = "model.export",
-    out_dir: str = WORKSPACE,
 ) -> str:
     """
-    Generate a Code_Aster .export file mapping all input/output files.
+    Generate a Code_Aster .export file with absolute paths for all inputs/outputs.
+    This avoids 'file not found' errors when running as_run/as_run.bat.
     """
-    comm_path = os.path.join(WORKSPACE, comm_name)
-    med_path = os.path.join(WORKSPACE, med_name)
-    export_path = os.path.join(WORKSPACE, export_name)
-    log_path = os.path.join(WORKSPACE, f"{job_name}.mess")
-    resu_path = os.path.join(WORKSPACE, f"{job_name}.resu")
-    base_path = os.path.join(WORKSPACE, f"{job_name}_base")
+    # Build absolute paths
+    comm_path = os.path.abspath(os.path.join(WORKSPACE, comm_name))
+    med_path = os.path.abspath(os.path.join(WORKSPACE, med_name))
+    export_path = os.path.abspath(os.path.join(WORKSPACE, export_name))
+    log_path = os.path.abspath(os.path.join(WORKSPACE, f"{job_name}.mess"))
+    resu_path = os.path.abspath(os.path.join(WORKSPACE, f"{job_name}.resu"))
+    base_path = os.path.abspath(os.path.join(WORKSPACE, f"{job_name}_base"))
 
-    # verify inputs
+    # Verify input existence
     if not os.path.exists(comm_path):
         return f"❌ Error: {comm_path} not found."
     if not os.path.exists(med_path):
         return f"❌ Error: {med_path} not found."
 
-    # fill template
+    # Fill template
     content = EXPORT_TEMPLATE.format(
         job_name=job_name,
         comm_path=comm_path,
@@ -65,13 +66,13 @@ def generate_export_tool(
         base_path=base_path,
     )
 
+    # Write export file
     with open(export_path, "w") as f:
         f.write(content)
 
     return (
-        f"✅ Generated {export_name} in '{WORKSPACE}'\n"
-        f"Job: {job_name}\n"
-        f"Inputs: {comm_name}, {med_name}\n"
-        f"Outputs: {job_name}.resu, {job_name}.mess\n"
-        f"→ Ready for Code_Aster run with 'as_run {export_name}'"
+        f"✅ Generated {export_name} with absolute paths\n"
+        f"Job name: {job_name}\n"
+        f"Export file: {export_path}\n"
+        f"→ Ready for Code_Aster execution"
     )

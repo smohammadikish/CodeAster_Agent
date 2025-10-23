@@ -31,9 +31,8 @@ cara = AFFE_CARA_ELEM(
   POUTRE=_F(GROUP_MA=('BEAM',),
             SECTION='RECTANGLE',
             CARA=('HY','HZ'),
-            VALE=({HY}, {HZ}),
-            ORIG_INER=(0.0, 0.0, 0.0),
-            VECT_Y=(0.0, 1.0, 0.0))
+            VALE=({HY}, {HZ})
+            )
 );
 
 # --- Boundary condition (BASE fixed) ---

@@ -26,7 +26,7 @@ def mesh_with_gmsh_tool(
     if gmsh_path is None:
         return f"❌ Error: '{gmsh_bin}' not found. Please install Gmsh or set GMSH_BIN in .env."
 
-    geo_path = os.path.join(WORKSPACE, geo_name) #Exp. user/myproj/wokspace/name.geo
+    geo_path = os.path.join(WORKSPACE, geo_name)  # Exp. user/myproj/wokspace/name.geo
     med_path = os.path.join(WORKSPACE, med_name)
 
     if not os.path.exists(geo_path):
