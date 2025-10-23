@@ -1,0 +1,22 @@
+P actions make_etude
+P debug nodebug
+P memjob 4194304
+P memory_limit 4096.0
+P mode interactif
+P mpi_nbcpu 1
+P mpi_nbnoeud 1
+P ncpus 1
+P nomjob beam_analysis
+P origine beam_agent_project
+P server localhost
+P time_limit 1800.0
+P version stable
+A memjeveux 256.0
+A tpmax 1800.0
+
+F comm D:\testaster\model.comm D 1
+F mmed D:\testaster\model.unv D 20
+F mess D:\testaster\beam_analysis.mess R 6
+F resu D:\testaster\beam_analysis.resu R 80
+
+R base D:\testaster\beam_analysis_base R 0
