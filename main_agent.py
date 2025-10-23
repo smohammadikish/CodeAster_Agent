@@ -1,8 +1,5 @@
 # main_agent.py
 import os
-from langchain.chat_models import ChatOpenAI
-
-# === Import tools ===
 from tools.geo_generator import generate_geo_tool
 from tools.mesher_gmsh import mesher_gmsh_tool
 from tools.comm_generator import comm_generator_tool
@@ -11,16 +8,27 @@ from tools.run_aster_tool import run_aster_tool
 from tools.visualize_tool import visualize_resu_tool
 from tools.summarize_results_tool import summarize_results_tool
 from tools.validators import file_exists
-
 from env_loader import load_env
 
-# --------------------------------------------------------------------
-# Global configuration
-# --------------------------------------------------------------------
+# ==============================
+# 🧠 LLM Configuration
+# ==============================
+# Choose which LLM backend to use
+
+from llm.mock_llm import MockLLM
+# from llm.openai_llm import get_openai_llm
+# from llm.local_llm import get_local_llm
+
+# Select model
+llm = MockLLM()                 # Offline mode (default for development)
+# llm = get_openai_llm()        # When company wants to connect to OpenAI
+# llm = get_local_llm("llama3") # When testing with local model like Ollama
+
+# ==============================
+# ⚙️ Global Configuration
+# ==============================
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
-
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 gmsh_bin, as_run_bin = load_env()
 
 
@@ -33,7 +41,7 @@ def safe_call(tool_func, expected_file: str | None = None, **kwargs) -> bool:
     result = tool_func.run(**kwargs)
     print(result)
 
-    # Detect errors
+    # Detect errors in tool result
     if "Error" in str(result) or "❌" in str(result):
         print(f"❌ {tool_func.name} failed — stopping pipeline.")
         return False
