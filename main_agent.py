@@ -1,36 +1,32 @@
 # main_agent.py
+import logging
 import os
 import sys
-import logging
 
-# =============================================
-# ⚙️ Import your tools (correct names)
-# =============================================
-from tools.geo_generator import generate_geo_tool
-from tools.mesher_gmsh import mesh_with_gmsh_tool
+from env_loader import load_env
+from llm.mock_llm import MockLLM
 from tools.comm_generator import generate_comm_tool
 from tools.export_generator import generate_export_tool
+from tools.geo_generator import generate_geo_tool
+from tools.mesher_gmsh import mesh_with_gmsh_tool
 from tools.run_aster_tool import run_code_aster_tool
-from tools.visualize_tool import visualize_resu_tool
 from tools.summarize_results_tool import summarize_results_tool
 from tools.validators import file_exists
-from env_loader import load_env
+from tools.visualize_tool import visualize_resu_tool
 
-# =============================================
-# 🧠 Import LLM (Mock / OpenAI / Local)
-# =============================================
-from llm.mock_llm import MockLLM
 # from llm.openai_llm import get_openai_llm
 # from llm.local_llm import get_local_llm
 
+
+
+
 # Choose model
-llm = MockLLM()                 # Offline mode (default for development)
+llm = MockLLM()  # Offline mode (default for development)
 # llm = get_openai_llm()        # Online (OpenAI API)
 # llm = get_local_llm("llama3") # Local LLM (Ollama / LM Studio)
 
-# =============================================
-# 🧱 Workspace setup & logging
-# =============================================
+
+# Workspace setup & logging
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
 gmsh_bin, as_run_bin, _ = load_env()
@@ -44,9 +40,7 @@ logging.basicConfig(
 logging.info("Pipeline started.")
 
 
-# =============================================
-# 🧩 Safe tool execution helper
-# =============================================
+# Safe tool execution helper
 def safe_call(tool_func, expected_file: str | None = None, **kwargs) -> bool:
     """
     Safely execute a tool, handle errors, and verify expected file.
@@ -72,46 +66,44 @@ def safe_call(tool_func, expected_file: str | None = None, **kwargs) -> bool:
     return True
 
 
-# =============================================
-# 🧮 Sequential (manual) pipeline
-# =============================================
+# Sequential (manual) pipeline
 def run_pipeline():
     """Run Code_Aster workflow step-by-step (manual mode)."""
     print("\n=== 🧠 Starting Code_Aster pipeline (manual mode) ===\n")
     logging.info("Sequential pipeline started.")
 
-    # 1️⃣ GEO
+    # 1. GEO
     geo_path = os.path.join(WORKSPACE, "model.geo")
     if not safe_call(generate_geo_tool, expected_file=geo_path):
         return
 
-    # 2️⃣ MESH
+    # 2. MESH
     med_path = os.path.join(WORKSPACE, "model.med")
     if not safe_call(mesh_with_gmsh_tool, expected_file=med_path):
         return
 
-    # 3️⃣ COMM
+    # 3. COMM
     comm_path = os.path.join(WORKSPACE, "model.comm")
     if not safe_call(generate_comm_tool, expected_file=comm_path):
         return
 
-    # 4️⃣ EXPORT
+    # 4. EXPORT
     export_path = os.path.join(WORKSPACE, "job.export")
     if not safe_call(generate_export_tool, expected_file=export_path):
         return
 
-    # 5️⃣ RUN ASTER
+    # 5. RUN ASTER
     mess_path = os.path.join(WORKSPACE, "result.mess")
     if not safe_call(run_code_aster_tool, expected_file=mess_path):
         return
 
-    # 6️⃣ SUMMARY
+    # 6. SUMMARY
     print("\n=== 📄 Summarizing analysis results ===")
     summary = summarize_results_tool.run()
     print(summary)
     logging.info("Summary generated successfully.")
 
-    # 7️⃣ VISUALIZATION
+    # 7. VISUALIZATION
     print("\n=== 📊 Generating visualization ===")
     visualization = visualize_resu_tool.run()
     print(visualization)
@@ -121,10 +113,9 @@ def run_pipeline():
     logging.info("Pipeline finished successfully.")
 
 
-# =============================================
-# 🤖 LangChain Agent (compatible with langchain 1.0.2)
-# =============================================
-from langchain_core.agents import create_react_agent, AgentExecutor
+# 🤖 LangChain Agent
+from langchain_core.agents import AgentExecutor, create_react_agent
+
 
 def run_agent_mode():
     print("\n=== 🤖 Running LLM-driven Agent Mode ===\n")

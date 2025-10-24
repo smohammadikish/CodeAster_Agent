@@ -1,6 +1,7 @@
 # tools/validators.py
 import os
 
+
 def file_exists(path: str) -> bool:
     """Check if a file exists and is not empty."""
     return os.path.exists(path) and os.path.getsize(path) > 0

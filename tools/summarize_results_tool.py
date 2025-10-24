@@ -1,5 +1,6 @@
 # tools/visualize_tool.py
 import os
+
 import matplotlib.pyplot as plt
 import numpy as np
 from langchain.tools import tool
@@ -7,10 +8,8 @@ from langchain.tools import tool
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
 
-# ==============================================================
-# Tool 1️⃣ : Visualization of numeric .resu results
-# ==============================================================
 
+# Tool 1 : Visualization of numeric .resu results
 @tool("visualize_resu", return_direct=False)
 def visualize_resu_tool(resu_name: str = "beam_job.resu", n_points: int = 100) -> str:
     """
@@ -64,10 +63,7 @@ def is_float(s):
         return False
 
 
-# ==============================================================
-# Tool 2️⃣ : Summarize .mess results (text-based summary)
-# ==============================================================
-
+# Tool 2: Summarize .mess results (text-based summary)
 @tool("summarize_results", return_direct=True)
 def summarize_results_tool(mess_name: str = "result.mess") -> str:
     """
@@ -89,7 +85,10 @@ def summarize_results_tool(mess_name: str = "result.mess") -> str:
     # Extract lines containing physical quantities or solver info
     summary = []
     for line in lines:
-        if any(keyword in line.upper() for keyword in ["SIGM", "DEPL", "ERROR", "CONVERGENCE", "MAX"]):
+        if any(
+            keyword in line.upper()
+            for keyword in ["SIGM", "DEPL", "ERROR", "CONVERGENCE", "MAX"]
+        ):
             summary.append(line.strip())
 
     if not summary:
