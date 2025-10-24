@@ -71,6 +71,11 @@ def is_float(s):
 @tool("summarize_results", return_direct=True)
 def summarize_results_tool(mess_name: str = "result.mess") -> str:
     """
+    Read and summarize key information from the Code_Aster .mess file.
+    This step must be executed after the solver has finished running.
+    It extracts convergence status, maximum stress, displacement, and key solver info.
+    """
+    """
     Read the .mess file and extract a short summary of main analysis results
     (e.g., max displacement, stress, or solver convergence info).
     """

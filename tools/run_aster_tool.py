@@ -14,6 +14,11 @@ os.makedirs(WORKSPACE, exist_ok=True)
 @tool("run_code_aster", return_direct=True)
 def run_code_aster_tool(export_name: str = "model.export") -> str:
     """
+    Run the Code_Aster solver using the generated export file.
+    This tool should be executed only after the export file has been created.
+    The solver produces output files such as .mess (log) and .resu (results).
+    """
+    """
     Run Code_Aster analysis using an .export file (absolute path).
     Detects OS and runs 'as_run' (Linux/macOS) or 'as_run.bat --run' (Windows).
 

@@ -37,6 +37,12 @@ def generate_geo_tool(
     geo_name: str = "model.geo",
 ) -> str:
     """
+    Generate the .geo file (geometry definition) for Code_Aster analysis.
+    This must be the first step in the pipeline, as it defines the model geometry.
+    The generated geometry file will later be used by the meshing tool.
+    """
+    
+    """
     Generate a minimal 1D beam .geo file for Gmsh with BASE/TIP/BEAM groups.
     Mesh density is controlled by the number of elements (n_elems).
     - length_m > 0

@@ -80,6 +80,11 @@ def generate_comm_tool(
     FY: float = -1000.0,  # N
 ) -> str:
     """
+    Generate the .comm file (command input file) for Code_Aster simulation.
+    This file contains solver instructions and must be created after meshing.
+    The .comm file will be linked in the export file for running Code_Aster.
+    """
+    """
     Generate a .comm file for Code_Aster beam analysis.
     It uses a .med mesh (BEAM, BASE, TIP) and defines material, section, BC, and load.
     """

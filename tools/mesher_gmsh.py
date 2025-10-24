@@ -17,6 +17,11 @@ def mesh_with_gmsh_tool(
     med_name: str = "model.med",
 ) -> str:
     """
+    Create a mesh (.med file) from the geometry file using Gmsh.
+    This tool must be executed after geometry generation (generate_geo_tool).
+    The resulting .med file will be used in later steps for Code_Aster simulation.
+    """
+    """
     Use Gmsh CLI to mesh a 1D geometry (.geo) and export it to MED format (.med).
     Requires Gmsh to be installed and accessible via PATH or set in .env as GMSH_BIN.
     """

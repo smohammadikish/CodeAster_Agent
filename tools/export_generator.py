@@ -39,6 +39,12 @@ def generate_export_tool(
     export_name: str = "model.export",
 ) -> str:
     """
+    Generate the .export file that defines paths and configuration
+    for Code_Aster's as_run command.
+    This step must be executed after the .comm file has been created.
+    The export file is the direct input for running the solver.
+    """
+    """
     Generate a Code_Aster .export file with absolute paths for all inputs/outputs.
     This avoids 'file not found' errors when running as_run/as_run.bat.
     """
