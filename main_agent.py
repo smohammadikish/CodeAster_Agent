@@ -1,10 +1,11 @@
-# main_agent.py
+# --- main_agent.py ---
+import argparse
 import logging
 import os
-import sys
+
+from langchain_community.chat_models import FakeListChatModel
 
 from env_loader import load_env
-from llm.mock_llm import MockLLM
 from tools.comm_generator import generate_comm_tool
 from tools.export_generator import generate_export_tool
 from tools.geo_generator import generate_geo_tool
@@ -14,24 +15,12 @@ from tools.summarize_results_tool import summarize_results_tool
 from tools.validators import file_exists
 from tools.visualize_tool import visualize_resu_tool
 
-# from llm.openai_llm import get_openai_llm
-# from llm.local_llm import get_local_llm
-
-
-
-
-# Choose model
-llm = MockLLM()  # Offline mode (default for development)
-# llm = get_openai_llm()        # Online (OpenAI API)
-# llm = get_local_llm("llama3") # Local LLM (Ollama / LM Studio)
-
-
-# Workspace setup & logging
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
+
 gmsh_bin, as_run_bin, _ = load_env()
 
-# Setup logging (writes to workspace/pipeline.log)
+# Setup logging
 logging.basicConfig(
     filename=os.path.join(WORKSPACE, "pipeline.log"),
     level=logging.INFO,
@@ -40,11 +29,9 @@ logging.basicConfig(
 logging.info("Pipeline started.")
 
 
-# Safe tool execution helper
+# ------------------ Helper function ------------------
 def safe_call(tool_func, expected_file: str | None = None, **kwargs) -> bool:
-    """
-    Safely execute a tool, handle errors, and verify expected file.
-    """
+    """Safely execute a tool, handle errors, and verify expected file."""
     print(f"\n🚀 Running: {tool_func.name}")
     result = tool_func.run(**kwargs)
     print(result)
@@ -53,73 +40,57 @@ def safe_call(tool_func, expected_file: str | None = None, **kwargs) -> bool:
 
     if "Error" in str(result) or "❌" in str(result):
         print(f"❌ {tool_func.name} failed — stopping pipeline.")
-        logging.error(f"{tool_func.name} failed.")
         return False
 
     if expected_file and not file_exists(expected_file):
         print(f"⚠️ Expected file not found: {expected_file}")
-        logging.warning(f"Missing file: {expected_file}")
         return False
 
     print(f"✅ Step '{tool_func.name}' completed successfully.\n")
-    logging.info(f"✅ Step '{tool_func.name}' completed successfully.")
     return True
 
 
-# Sequential (manual) pipeline
+# ------------------ Manual mode ------------------
 def run_pipeline():
     """Run Code_Aster workflow step-by-step (manual mode)."""
     print("\n=== 🧠 Starting Code_Aster pipeline (manual mode) ===\n")
-    logging.info("Sequential pipeline started.")
 
-    # 1. GEO
-    geo_path = os.path.join(WORKSPACE, "model.geo")
-    if not safe_call(generate_geo_tool, expected_file=geo_path):
+    if not safe_call(
+        generate_geo_tool, expected_file=os.path.join(WORKSPACE, "model.geo")
+    ):
+        return
+    if not safe_call(
+        mesh_with_gmsh_tool, expected_file=os.path.join(WORKSPACE, "model.med")
+    ):
+        return
+    if not safe_call(
+        generate_comm_tool, expected_file=os.path.join(WORKSPACE, "model.comm")
+    ):
+        return
+    if not safe_call(
+        generate_export_tool, expected_file=os.path.join(WORKSPACE, "job.export")
+    ):
+        return
+    if not safe_call(
+        run_code_aster_tool, expected_file=os.path.join(WORKSPACE, "result.mess")
+    ):
         return
 
-    # 2. MESH
-    med_path = os.path.join(WORKSPACE, "model.med")
-    if not safe_call(mesh_with_gmsh_tool, expected_file=med_path):
-        return
+    print("\n=== 📄 Summarizing results ===")
+    print(summarize_results_tool.run())
 
-    # 3. COMM
-    comm_path = os.path.join(WORKSPACE, "model.comm")
-    if not safe_call(generate_comm_tool, expected_file=comm_path):
-        return
+    print("\n=== 📊 Visualizing ===")
+    print(visualize_resu_tool.run())
 
-    # 4. EXPORT
-    export_path = os.path.join(WORKSPACE, "job.export")
-    if not safe_call(generate_export_tool, expected_file=export_path):
-        return
-
-    # 5. RUN ASTER
-    mess_path = os.path.join(WORKSPACE, "result.mess")
-    if not safe_call(run_code_aster_tool, expected_file=mess_path):
-        return
-
-    # 6. SUMMARY
-    print("\n=== 📄 Summarizing analysis results ===")
-    summary = summarize_results_tool.run()
-    print(summary)
-    logging.info("Summary generated successfully.")
-
-    # 7. VISUALIZATION
-    print("\n=== 📊 Generating visualization ===")
-    visualization = visualize_resu_tool.run()
-    print(visualization)
-    logging.info("Visualization completed successfully.")
-
-    print("\n🎯 Pipeline finished successfully! Results saved in /workspace")
-    logging.info("Pipeline finished successfully.")
+    print("\n🎯 Pipeline finished successfully!")
 
 
-# 🤖 LangChain Agent
-from langchain_core.agents import AgentExecutor, create_react_agent
+# ------------------ Agent mode ------------------
+def run_agent_mode(llm):
+    """Run Agent-based Code_Aster workflow."""
+    from langchain.agents import AgentExecutor, create_tool_calling_agent
 
-
-def run_agent_mode():
     print("\n=== 🤖 Running LLM-driven Agent Mode ===\n")
-    logging.info("Starting LLM-driven agent mode (v1.0.2).")
 
     tools = [
         generate_geo_tool,
@@ -131,12 +102,47 @@ def run_agent_mode():
         visualize_resu_tool,
     ]
 
-    agent = create_react_agent(llm, tools)
-    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+    agent = create_tool_calling_agent(llm, tools)
+    executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
-    user_prompt = "Simulate a 3-meter beam with 15 elements and visualize the results."
-    result = agent_executor.invoke({"input": user_prompt})
-
+    user_prompt = (
+        "Simulate a 3-meter steel beam with 15 elements and visualize the results."
+    )
+    result = executor.invoke({"input": user_prompt})
     print("\n=== 🧠 AGENT RESULT ===")
     print(result["output"])
-    logging.info(f"Agent result: {result['output']}")
+
+
+# ------------------ Entry point ------------------
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["agent", "manual", "auto"], default="auto")
+    args = parser.parse_args()
+
+    # Try loading LLM (Ollama or fallback)
+    try:
+        from langchain_ollama import ChatOllama
+
+        llm = ChatOllama(model="mistral", temperature=0)
+        online = True
+        print("🧠 LLM model loaded (Ollama: mistral)")
+
+    except Exception as e:
+        llm = FakeListChatModel(
+            responses=[
+                "OK. Let's start the analysis.",
+                "Geometry created.",
+                "Mesh done.",
+                "Simulation completed.",
+                "Visualization ready.",
+            ]
+        )
+        online = False
+        print(f"⚠️ No local model found ({e}). Using FakeListChatModel (offline mode).")
+
+    # Decide execution mode
+    mode = args.mode
+    if mode == "agent" or (mode == "auto" and online):
+        run_agent_mode(llm)
+    else:
+        run_pipeline()

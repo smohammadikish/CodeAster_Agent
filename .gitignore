@@ -225,3 +225,7 @@ __marimo__/
 
 # workspace outputs
 workspace/
+
+
+*.pyc
+pipeline.log
