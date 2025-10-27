@@ -1,4 +1,4 @@
-# --- main_agent.py ---
+# main_agent.py
 import argparse
 import logging
 import os

@@ -1,72 +1,157 @@
 # tools/comm_generator.py
 import os
-
 from langchain.tools import tool
 
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
 
 COMM_TEMPLATE = r"""
-# --- Code_Aster Beam Analysis (.comm) ---
-DEBUT();
+# __________________________ Start __________________________
+DEBUT(PAR_LOT='NON');
 
+# ______________________ Read the mesh ______________________
 mesh = LIRE_MAILLAGE(FORMAT='MED', UNITE=20);
 
-model = AFFE_MODELE(
-  MAILLAGE=mesh,
-  AFFE=_F(GROUP_MA=('BEAM',), PHENOMENE='MECANIQUE', MODELISATION='POU_D_E')
+# ____________ Define node groups (BASE, TIP, BEAM) __________
+mesh = DEFI_GROUP(
+  reuse=mesh,
+  CREA_GROUP_NO=(
+    _F(GROUP_MA=('BEAM',), CRIT_NOEUD='TOUS'),
+    _F(GROUP_MA=('BASE',), CRIT_NOEUD='TOUS'),
+    _F(GROUP_MA=('TIP',),  CRIT_NOEUD='TOUS'),
+  ),
+  MAILLAGE=mesh
 );
 
-# --- Material definition ---
+# ___________________ Define mechanical model _________________
+model = AFFE_MODELE(
+  MAILLAGE=mesh,
+  AFFE=_F(
+    GROUP_MA=('BEAM',),
+    PHENOMENE='MECANIQUE',
+    MODELISATION='POU_D_T'
+  )
+);
+
+# ____________________ Define material ________________________
 mat = DEFI_MATERIAU(ELAS=_F(E={E}, NU={NU}, RHO={RHO}));
 
-chmat = AFFE_MATERIAU(
+mater = AFFE_MATERIAU(
   MAILLAGE=mesh,
   AFFE=_F(GROUP_MA=('BEAM',), MATER=mat)
 );
 
-# --- Beam section geometry (RECTANGLE) ---
+# __________ Define beam section geometry (rectangular) ________
 cara = AFFE_CARA_ELEM(
   MODELE=model,
-  POUTRE=_F(GROUP_MA=('BEAM',),
-            SECTION='RECTANGLE',
-            CARA=('HY','HZ'),
-            VALE=({HY}, {HZ})
-            )
+  POUTRE=_F(
+    GROUP_MA=('BEAM',),
+    SECTION='RECTANGLE',
+    CARA=('HY','HZ'),
+    VALE=({HY}, {HZ})
+  )
 );
 
-# --- Boundary condition (BASE fixed) ---
-bc = AFFE_CHAR_CINE(
+# __________________ Boundary condition (BASE) _________________
+constr = AFFE_CHAR_MECA(
   MODELE=model,
-  MECA_IMPO=_F(GROUP_NO=('BASE',),
-               DX=0.0, DY=0.0, DZ=0.0,
-               DRX=0.0, DRY=0.0, DRZ=0.0)
+  DDL_IMPO=_F(
+    GROUP_NO=('BASE',),
+    DX=0.0, DY=0.0, DZ=0.0,
+    DRX=0.0, DRY=0.0, DRZ=0.0
+  )
 );
 
-# --- Load (Nodal Force on TIP) ---
+# __________________ Applied load on TIP _______________________
 load = AFFE_CHAR_MECA(
   MODELE=model,
-  FORCE_NODALE=_F(GROUP_NO=('TIP',), FY={FY})
+  FORCE_NODALE=_F(
+    GROUP_NO=('TIP',),
+    FY={FY}
+  )
 );
 
-# --- Static analysis ---
-res = MECA_STATIQUE(
+# __________________ Static analysis __________________________
+res_stat = MECA_STATIQUE(
   MODELE=model,
-  CHAM_MATER=chmat,
+  CHAM_MATER=mater,
   CARA_ELEM=cara,
-  EXCIT=(_F(CHARGE=bc), _F(CHARGE=load))
+  EXCIT=(
+    _F(CHARGE=constr),
+    _F(CHARGE=load)
+  ),
+  SOLVEUR=_F(
+    METHODE='MUMPS',
+    STOP_SINGULIER='OUI',
+    RENUM='METIS',
+    NPREC=8,
+    ELIM_LAGR='NON'
+  )
 );
 
-# --- Print displacement field ---
+# __________ Compute displacements, reactions, stresses ________
+res_stat = CALC_CHAMP(
+  reuse=res_stat,
+  RESULTAT=res_stat,
+  FORCE=('REAC_NODA',),
+  CONTRAINTE=('EFGE_ELNO', 'SIGM_ELNO')
+);
+
+# __________ Create result tables (reactions, displacements) ___
+tab_reac = CREA_TABLE(
+  RESU=_F(
+    GROUP_NO=('BASE',),
+    NOM_CHAM='REAC_NODA',
+    RESULTAT=res_stat,
+    TOUT_CMP='OUI'
+  ),
+  TITRE='Nodal Reactions'
+);
+
+tab_disp = CREA_TABLE(
+  RESU=_F(
+    TOUT='OUI',
+    NOM_CHAM='DEPL',
+    RESULTAT=res_stat,
+    TOUT_CMP='OUI'
+  ),
+  TITRE='Nodal Displacements'
+);
+
+# __________________ Print tables to text ______________________
+IMPR_TABLE(
+  TABLE=tab_reac,
+  NOM_PARA=('NOEUD','DX','DY','DZ','DRX','DRY','DRZ','FX','FY','FZ','MX','MY','MZ'),
+  UNITE=18
+);
+
+IMPR_TABLE(
+  TABLE=tab_disp,
+  NOM_PARA=('NOEUD','DX','DY','DZ','DRX','DRY','DRZ'),
+  UNITE=19
+);
+
+# __________________ Print displacement field __________________
 IMPR_RESU(
   FORMAT='RESULTAT',
   UNITE=80,
-  RESU=_F(RESULTAT=res, NOM_CHAM='DEPL')
+  RESU=_F(RESULTAT=res_stat, NOM_CHAM='DEPL')
 );
 
+# __________________ Print local coordinate systems ____________
+IMPR_CONCEPT(
+  CONCEPT=_F(
+    CARA_ELEM=cara,
+    MODELE=model,
+    REPERE_LOCAL='ELEM'
+  ),
+  FORMAT='RESULTAT',
+  UNITE=53
+);
+
+# __________________________ End __________________________
 FIN();
 """
-
 
 @tool("generate_comm", return_direct=False)
 def generate_comm_tool(
@@ -74,37 +159,39 @@ def generate_comm_tool(
     comm_name: str = "model.comm",
     E: float = 11e9,  # Pa
     NU: float = 0.3,
-    RHO: float = 500.0,  # kg/m3
-    HY: float = 0.10,  # m
+    RHO: float = 480.0,  # kg/m3
+    HY: float = 0.12,  # m
     HZ: float = 0.10,  # m
-    FY: float = -1000.0,  # N
+    FY: float = -1500.0,  # N
 ) -> str:
     """
-    Generate the .comm file (command input file) for Code_Aster simulation.
-    This file contains solver instructions and must be created after meshing.
-    The .comm file will be linked in the export file for running Code_Aster.
+    Generate the .comm file (command input for Code_Aster).
+    Compatible with Code_Aster 14.4 Windows/Linux.
+    Includes group reconstruction (BASE, TIP, BEAM) and full output tables.
     """
-    """
-    Generate a .comm file for Code_Aster beam analysis.
-    It uses a .med mesh (BEAM, BASE, TIP) and defines material, section, BC, and load.
-    """
+
     med_path = os.path.join(WORKSPACE, med_name)
     comm_path = os.path.join(WORKSPACE, comm_name)
 
     if not os.path.exists(med_path):
         return f"❌ Error: mesh file '{med_path}' not found."
 
-    # fill template
+    # Fill the template with input parameters
     content = COMM_TEMPLATE.format(E=E, NU=NU, RHO=RHO, HY=HY, HZ=HZ, FY=FY)
 
-    # write to file
-    with open(comm_path, "w") as f:
+    # Write .comm file
+    with open(comm_path, "w", encoding="utf-8") as f:
         f.write(content)
 
     return (
-        f"✅ Generated {comm_name} in '{WORKSPACE}'\n"
+        f"✅ Generated {comm_name} successfully.\n"
         f"Material: E={E:.2e}, ν={NU}, ρ={RHO}\n"
         f"Section: HY={HY}, HZ={HZ}\n"
-        f"Load: FY={FY} N (on TIP)\n"
-        f"→ Ready for Code_Aster run"
+        f"Load: FY={FY} N applied at TIP\n"
+        f"→ Ready for Code_Aster run."
     )
+
+
+
+
+

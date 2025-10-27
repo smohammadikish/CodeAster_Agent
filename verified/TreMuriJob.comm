@@ -1,0 +1,338 @@
+
+# __________________________ Debut _________________________
+DEBUT(PAR_LOT='NON')
+
+# ____________________ Reading the mesh ____________________
+mesh = LIRE_MAILLAGE(UNITE=20)
+
+# ______________ Defining the groups of nodes ______________
+mesh = DEFI_GROUP(reuse=mesh,
+	CREA_GROUP_NO=(
+		_F(GROUP_MA=('ALL_P',)),),
+	MAILLAGE=mesh)
+
+# ________ Assigning finite elements to the groups _________
+model = AFFE_MODELE(AFFE=(
+		_F(GROUP_MA=('T_1'),
+		 MODELISATION = 'POU_D_T',
+		 PHENOMENE='MECANIQUE'),
+		_F(GROUP_MA=('P_3'),
+		 MODELISATION = 'POU_D_T',
+		 PHENOMENE='MECANIQUE'),
+		_F(GROUP_MA=('P_4'),
+		 MODELISATION = 'POU_D_T',
+		 PHENOMENE='MECANIQUE'),),
+ MAILLAGE=mesh)
+
+# _____ Assigning the characteristics to the elements ______
+cara = AFFE_CARA_ELEM(MODELE=model,
+		POUTRE=(
+			_F(GROUP_MA=('T_1'),
+			SECTION='GENERALE',
+			CARA=('A', 'AY', 'AZ', 'IZ', 'IY', 'JX'),
+			VALE=(900, 1.2, 1.2, 67500, 67500, 99900)),
+			_F(GROUP_MA=('P_3'),
+			SECTION='GENERALE',
+			CARA=('A', 'AY', 'AZ', 'IZ', 'IY', 'JX'),
+			VALE=(900, 1.2, 1.2, 67500, 67500, 99900)),
+			_F(GROUP_MA=('P_4'),
+			SECTION='GENERALE',
+			CARA=('A', 'AY', 'AZ', 'IZ', 'IY', 'JX'),
+			VALE=(900, 1.2, 1.2, 67500, 67500, 99900)),))
+
+# ________________ Defining the materials __________________
+C_5 = DEFI_MATERIAU(ELAS=_F(E=299620,
+	NU=0.200016020506248,
+	RHO=0.00254841997961264))
+S_18 = DEFI_MATERIAU(ELAS=_F(E=2060000,
+	NU=0.299996213603261,
+	RHO=0.00800203873598369))
+
+
+# _______________ Assigning the materials __________________
+mater = AFFE_MATERIAU(AFFE=(
+	_F(MATER=(C_5, ),
+		GROUP_MA=('T_1')),
+	_F(MATER=(C_5, ),
+		GROUP_MA=('P_3')),
+	_F(MATER=(C_5, ),
+		GROUP_MA=('P_4')),),
+MAILLAGE=mesh)
+
+# ________________ Adding the constraints ___________________
+constr = AFFE_CHAR_MECA(DDL_IMPO=(
+	_F(	DX=0,
+	DY=0,
+	DZ=0,
+	DRX=0,
+	DRY=0,
+	DRZ=0,
+GROUP_MA=('NS_1_VVVVVV')),),
+MODELE=model)
+
+# ____________________ Load case G1pp ______________________
+G1pp = AFFE_CHAR_MECA(
+	PESANTEUR=(
+		_F(DIRECTION=(0,0,-1),
+		GRAVITE=0.981, 
+		GROUP_MA = ('T_1' ,'P_3', 'P_4' ))),
+MODELE=model)
+
+# ____________________ Analysis G1pp _______________________
+resG1pp = MECA_STATIQUE(	MODELE=model,
+	CARA_ELEM=cara,
+	CHAM_MATER=mater,
+	SOLVEUR = _F(METHODE = "MUMPS",
+		STOP_SINGULIER ="OUI",
+		RENUM ="METIS",
+		NPREC = 8,
+		ELIM_LAGR = "NON",),
+	EXCIT=(_F(CHARGE=constr),
+		_F(CHARGE=G1pp),
+))
+
+# ______________ Extracting nodal reactions ________________
+resG1pp=CALC_CHAMP(reuse=resG1pp,
+	FORCE=('REAC_NODA',),
+	RESULTAT=resG1pp)
+
+# ______________ Extracting internal forces ________________
+resG1pp=CALC_CHAMP(reuse=resG1pp,
+	CONTRAINTE=('EFGE_ELNO',),
+	RESULTAT=resG1pp)
+
+# _____________ Extracting surface stresses ________________
+resG1pp=CALC_CHAMP(reuse=resG1pp,
+	CONTRAINTE=('SIGM_ELNO',),
+	RESULTAT=resG1pp)
+
+# __________ Extracting bottom surface stresses ____________
+SiBG1pp = POST_CHAMP(EXTR_COQUE=_F(NIVE_COUCHE='INF',
+	NOM_CHAM=('SIGM_ELNO', ),
+	NUME_COUCHE=1),
+	RESULTAT=resG1pp)
+
+# __________ Extracting middle surface stresses ____________
+SiMG1pp = POST_CHAMP(EXTR_COQUE=_F(NIVE_COUCHE='MOY',
+	NOM_CHAM=('SIGM_ELNO', ),
+	NUME_COUCHE=1),
+	RESULTAT=resG1pp)
+
+# ___________ Extracting top surface stresses ______________
+SiTG1pp = POST_CHAMP(EXTR_COQUE=_F(NIVE_COUCHE='SUP',
+	NOM_CHAM=('SIGM_ELNO', ),
+	NUME_COUCHE=1),
+	RESULTAT=resG1pp)
+
+# ___________ Creating tables nodal reactions ______________
+tRG1pp=CREA_TABLE(RESU=_F(GROUP_MA=('NS_1_VVVVVV',),
+	NOM_CHAM='REAC_NODA',
+	RESULTAT=resG1pp,
+	TOUT_CMP='OUI'),
+	TITRE='NODAL REACTIONS G1pp')
+
+# __________ Creating tables internal forces 1D ____________
+tF1dG1pp=CREA_TABLE(RESU=_F(GROUP_MA=('T_1','P_3','P_4',),
+	NOM_CHAM='EFGE_ELNO',
+	RESULTAT=resG1pp,
+	TOUT_CMP='OUI'),
+	TITRE='INTERNAL FORCES 1D G1pp')
+
+# ____________ Creating tables displacements _______________
+tDG1pp=CREA_TABLE(RESU=_F(TOUT='OUI',
+	NOM_CHAM='DEPL',
+	RESULTAT=resG1pp,
+	TOUT_CMP='OUI'),
+	TITRE='DISPLACEMENTS G1pp')
+
+# ___________ Printing tables nodal reactions ______________
+IMPR_TABLE(TABLE=tRG1pp,
+	NOM_PARA=('NOEUD','DX','DY','DZ','DRX','DRY','DRZ',),
+	UNITE=18)
+
+# __________ Printing tables internal forces 1D ____________
+IMPR_TABLE(TABLE=tF1dG1pp,
+	NOM_PARA=('MAILLE','NOEUD','N','VY','VZ','MT','MFY','MFZ',),
+	UNITE=3)
+
+# ____________ Printing tables displacements _______________
+IMPR_TABLE(TABLE=tDG1pp,
+	NOM_PARA=('NOEUD','DX','DY','DZ','DRX','DRY','DRZ',),
+	UNITE=11)
+
+# ______________ Extracting nodal reactions ________________
+
+# ______________ Extracting internal forces ________________
+
+# _____________ Extracting surface stresses ________________
+
+# __________ Extracting bottom surface stresses ____________
+
+# __________ Extracting middle surface stresses ____________
+
+# ___________ Extracting top surface stresses ______________
+
+# ___________ Creating tables nodal reactions ______________
+
+# __________ Creating tables internal forces 1D ____________
+
+# ____________ Creating tables displacements _______________
+
+# ___________ Printing tables nodal reactions ______________
+
+# __________ Printing tables internal forces 1D ____________
+
+# ____________ Printing tables displacements _______________
+
+# ___________ Delete tables ______________
+
+DETRUIRE(CONCEPT = _F(NOM = (tRG1, tF1dG1, tDG1)), INFO=1) 
+
+# ______________ Extracting nodal reactions ________________
+
+# ______________ Extracting internal forces ________________
+
+# _____________ Extracting surface stresses ________________
+
+# __________ Extracting bottom surface stresses ____________
+
+# __________ Extracting middle surface stresses ____________
+
+# ___________ Extracting top surface stresses ______________
+
+# ___________ Creating tables nodal reactions ______________
+
+# __________ Creating tables internal forces 1D ____________
+
+# ____________ Creating tables displacements _______________
+
+# ___________ Printing tables nodal reactions ______________
+
+# __________ Printing tables internal forces 1D ____________
+
+# ____________ Printing tables displacements _______________
+
+# ___________ Delete tables ______________
+
+DETRUIRE(CONCEPT = _F(NOM = (tRG2, tF1dG2, tDG2)), INFO=1) 
+
+# ______________ Extracting nodal reactions ________________
+
+# ______________ Extracting internal forces ________________
+
+# _____________ Extracting surface stresses ________________
+
+# __________ Extracting bottom surface stresses ____________
+
+# __________ Extracting middle surface stresses ____________
+
+# ___________ Extracting top surface stresses ______________
+
+# ___________ Creating tables nodal reactions ______________
+
+# __________ Creating tables internal forces 1D ____________
+
+# ____________ Creating tables displacements _______________
+
+# ___________ Printing tables nodal reactions ______________
+
+# __________ Printing tables internal forces 1D ____________
+
+# ____________ Printing tables displacements _______________
+
+# ___________ Delete tables ______________
+
+DETRUIRE(CONCEPT = _F(NOM = (tRQ, tF1dQ, tDQ)), INFO=1) 
+
+# ______________ Extracting nodal reactions ________________
+
+# ______________ Extracting internal forces ________________
+
+# _____________ Extracting surface stresses ________________
+
+# __________ Extracting bottom surface stresses ____________
+
+# __________ Extracting middle surface stresses ____________
+
+# ___________ Extracting top surface stresses ______________
+
+# ___________ Creating tables nodal reactions ______________
+
+# __________ Creating tables internal forces 1D ____________
+
+# ____________ Creating tables displacements _______________
+
+# ___________ Printing tables nodal reactions ______________
+
+# __________ Printing tables internal forces 1D ____________
+
+# ____________ Printing tables displacements _______________
+
+# ___________ Delete tables ______________
+
+DETRUIRE(CONCEPT = _F(NOM = (tRQ0, tF1dQ0, tDQ0)), INFO=1) 
+
+# ______________ Extracting nodal reactions ________________
+
+# ______________ Extracting internal forces ________________
+
+# _____________ Extracting surface stresses ________________
+
+# __________ Extracting bottom surface stresses ____________
+
+# __________ Extracting middle surface stresses ____________
+
+# ___________ Extracting top surface stresses ______________
+
+# ___________ Creating tables nodal reactions ______________
+
+# __________ Creating tables internal forces 1D ____________
+
+# ____________ Creating tables displacements _______________
+
+# ___________ Printing tables nodal reactions ______________
+
+# __________ Printing tables internal forces 1D ____________
+
+# ____________ Printing tables displacements _______________
+
+# ___________ Delete tables ______________
+
+DETRUIRE(CONCEPT = _F(NOM = (tRQ1, tF1dQ1, tDQ1)), INFO=1) 
+
+# ______________ Extracting nodal reactions ________________
+
+# ______________ Extracting internal forces ________________
+
+# _____________ Extracting surface stresses ________________
+
+# __________ Extracting bottom surface stresses ____________
+
+# __________ Extracting middle surface stresses ____________
+
+# ___________ Extracting top surface stresses ______________
+
+# ___________ Creating tables nodal reactions ______________
+
+# __________ Creating tables internal forces 1D ____________
+
+# ____________ Creating tables displacements _______________
+
+# ___________ Printing tables nodal reactions ______________
+
+# __________ Printing tables internal forces 1D ____________
+
+# ____________ Printing tables displacements _______________
+
+# ___________ Delete tables ______________
+
+DETRUIRE(CONCEPT = _F(NOM = (tRQ2, tF1dQ2, tDQ2)), INFO=1) 
+
+# __________ Printing the field contaning the LCS ___________
+IMPR_CONCEPT(CONCEPT = _F(CARA_ELEM=cara,
+		MODELE = model,
+		REPERE_LOCAL = 'ELEM'),
+		FORMAT = 'RESULTAT',
+		UNITE = 53)
+# ___________________________ Fin __________________________
+FIN()
