@@ -1,5 +1,6 @@
 # tools/comm_generator.py
 import os
+
 from langchain.tools import tool
 
 WORKSPACE = "workspace"
@@ -153,6 +154,7 @@ IMPR_CONCEPT(
 FIN();
 """
 
+
 @tool("generate_comm", return_direct=False)
 def generate_comm_tool(
     med_name: str = "model.med",
@@ -190,8 +192,3 @@ def generate_comm_tool(
         f"Load: FY={FY} N applied at TIP\n"
         f"→ Ready for Code_Aster run."
     )
-
-
-
-
-

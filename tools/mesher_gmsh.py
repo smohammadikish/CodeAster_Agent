@@ -2,7 +2,9 @@
 import os
 import shutil
 import subprocess
+
 from langchain.tools import tool
+
 from env_loader import load_env  # To read the GMSH_BIN path from .env
 
 WORKSPACE = "workspace"
@@ -33,9 +35,14 @@ def mesh_with_gmsh_tool(
 
     # --- Force MED 4.0.0 compatibility for Code_Aster 4.0.0 ---
     gmsh_opts = [
-        "-setnumber", "Mesh.MedFileMinorVersion", "0",  # <= Key fix line
-        "-setnumber", "Mesh.SaveWithoutOrphans", "1",   # keep mesh clean
-        "-v", "2"                                       # verbosity level
+        "-setnumber",
+        "Mesh.MedFileMinorVersion",
+        "0",  # <= Key fix line
+        "-setnumber",
+        "Mesh.SaveWithoutOrphans",
+        "1",  # keep mesh clean
+        "-v",
+        "2",  # verbosity level
     ]
 
     # --- Build Gmsh command (1D mesh + MED output) ---

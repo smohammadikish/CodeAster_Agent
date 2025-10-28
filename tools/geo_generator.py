@@ -1,5 +1,6 @@
 # tools/geo_generator.py
 import os
+
 from langchain.tools import tool
 
 WORKSPACE = "workspace"
@@ -30,6 +31,7 @@ Physical Point("BASE") = {{1}};
 Physical Point("TIP")  = {{2}};
 Physical Curve("BEAM") = {{1}};
 """
+
 
 @tool("generate_geo", return_direct=False)
 def generate_geo_tool(
