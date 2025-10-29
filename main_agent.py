@@ -3,8 +3,6 @@ import argparse
 import logging
 import os
 
-from langchain_community.chat_models import FakeListChatModel
-
 from env_loader import load_env
 from tools.comm_generator import generate_comm_tool
 from tools.export_generator import generate_export_tool
@@ -18,9 +16,10 @@ from tools.visualize_tool import visualize_resu_tool
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
 
-gmsh_bin, as_run_bin, _ = load_env()
+# ✅ Only two values are retrieved (previously three were here)
+gmsh_bin, as_run_bin = load_env()
 
-# Setup logging
+# ------------------ Logging setup ------------------
 logging.basicConfig(
     filename=os.path.join(WORKSPACE, "pipeline.log"),
     level=logging.INFO,
@@ -29,7 +28,7 @@ logging.basicConfig(
 logging.info("Pipeline started.")
 
 
-# ------------------ Helper function ------------------
+# ------------------ Helper ------------------
 def safe_call(tool_func, expected_file: str | None = None, **kwargs) -> bool:
     """Safely execute a tool, handle errors, and verify expected file."""
     print(f"\n🚀 Running: {tool_func.name}")
@@ -87,8 +86,9 @@ def run_pipeline():
 
 # ------------------ Agent mode ------------------
 def run_agent_mode(llm):
-    """Run Agent-based Code_Aster workflow."""
+    """Run Agent-based Code_Aster workflow (LangChain 1.x)."""
     from langchain.agents import AgentExecutor, create_tool_calling_agent
+    from langchain.prompts import ChatPromptTemplate
 
     print("\n=== 🤖 Running LLM-driven Agent Mode ===\n")
 
@@ -102,13 +102,23 @@ def run_agent_mode(llm):
         visualize_resu_tool,
     ]
 
-    agent = create_tool_calling_agent(llm, tools)
+    # ✅ Updated prompt for compatibility with new LangChain (only requires input + agent_scratchpad)
+    prompt = ChatPromptTemplate.from_template(
+        # System/role instructions:
+        "You are a mechanical engineering assistant that can use the provided tools "
+        "to simulate, analyze, and visualize beam models using Code_Aster.\n\n"
+        # Required variables for LangChain agent:
+        "User input: {input}\n"
+        "{agent_scratchpad}"
+    )
+
+    # ✅ Create Agent with (llm, tools, prompt)
+    agent = create_tool_calling_agent(llm, tools, prompt)
     executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
-    user_prompt = (
-        "Simulate a 3-meter steel beam with 15 elements and visualize the results."
-    )
+    user_prompt = "Simulate a 3-meter steel beam with 15 elements and visualize the results."
     result = executor.invoke({"input": user_prompt})
+
     print("\n=== 🧠 AGENT RESULT ===")
     print(result["output"])
 
@@ -119,28 +129,34 @@ if __name__ == "__main__":
     parser.add_argument("--mode", choices=["agent", "manual", "auto"], default="auto")
     args = parser.parse_args()
 
-    # Try loading LLM (Ollama or fallback)
+    # ✅ Try to load MockLLM (offline mode)
     try:
-        from langchain_ollama import ChatOllama
-
-        llm = ChatOllama(model="mistral", temperature=0)
-        online = True
-        print("🧠 LLM model loaded (Ollama: mistral)")
-
-    except Exception as e:
-        llm = FakeListChatModel(
-            responses=[
-                "OK. Let's start the analysis.",
-                "Geometry created.",
-                "Mesh done.",
-                "Simulation completed.",
-                "Visualization ready.",
-            ]
-        )
+        from llm.mock_llm import MockLLM
+        llm = MockLLM()
+        print("🧠 Using local MockLLM (offline testing mode).")
         online = False
-        print(f"⚠️ No local model found ({e}). Using FakeListChatModel (offline mode).")
+    except Exception as e:
+        print(f"⚠️ Could not load MockLLM: {e}. Trying Ollama or FakeListChatModel.")
+        try:
+            from langchain_ollama import ChatOllama
+            llm = ChatOllama(model="mistral", temperature=0)
+            online = True
+            print("🧠 LLM model loaded (Ollama: mistral)")
+        except Exception as e:
+            from langchain_community.chat_models import FakeListChatModel
+            llm = FakeListChatModel(
+                responses=[
+                    "OK. Let's start the analysis.",
+                    "Geometry created.",
+                    "Mesh done.",
+                    "Simulation completed.",
+                    "Visualization ready.",
+                ]
+            )
+            online = False
+            print(f"⚠️ No local model found ({e}). Using FakeListChatModel (offline fallback).")
 
-    # Decide execution mode
+    # ✅ Choose execution mode
     mode = args.mode
     if mode == "agent" or (mode == "auto" and online):
         run_agent_mode(llm)
