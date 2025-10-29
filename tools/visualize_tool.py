@@ -117,61 +117,165 @@ def visualize_resu_tool(resu_name: str = "beam_analysis.resu") -> str:
 # 🟥 TOOL 2 — STRESS CONTOUR MAP
 # ============================================================
 @tool("visualize_stress", return_direct=False)
-def visualize_stress_tool(stress_name: str = "tab_stress.txt") -> str:
+def visualize_stress_tool(stress_name: str = "tab_sie.txt") -> str:
     """
-    Parse Code_Aster stress table (IMPR_TABLE output)
-    and visualize stress distribution (σxx) along beam length.
+    Parse Code_Aster table from IMPR_TABLE (POST_RELEVE_T) output
+    and visualize internal shear force (VY) and bending moment (MFZ) along the beam.
+    Handles correct node order (N1 → N2 at the end).
     """
     stress_path = os.path.join(WORKSPACE, stress_name)
     if not os.path.exists(stress_path):
         return f"❌ Error: file '{stress_path}' not found."
 
-    node_pattern = re.compile(r"^\s*N\d+\s+")
     data = []
     with open(stress_path, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
-            if node_pattern.match(line):
-                parts = line.strip().split()
-                if len(parts) >= 3:
-                    try:
-                        node_id = int(parts[0][1:])
-                        sxx = float(parts[1])  # assuming SIXX is 2nd column
-                        data.append((node_id, sxx))
-                    except Exception:
-                        continue
+            if not line.strip() or line.startswith("#") or "NOM_CHAM" in line:
+                continue
+            parts = [p.strip() for p in line.split(";")]
+            if len(parts) >= 16 and parts[1].startswith("N"):
+                try:
+                    node_id = int(parts[1][1:])  # remove "N"
+                    vy = float(parts[11])  # shear force
+                    mfz = float(parts[15])  # bending moment
+                    data.append((node_id, vy, mfz))
+                except Exception:
+                    continue
 
     if len(data) == 0:
-        return f"⚠️ No stress data found in '{stress_name}'."
+        return f"⚠️ No internal force data found in '{stress_name}'."
 
+    # Sort by node ID
     data.sort(key=lambda x: x[0])
     node_ids = np.array([d[0] for d in data])
-    sxx = np.array([d[1] for d in data])
+    vy = np.array([d[1] for d in data])
+    mfz = np.array([d[2] for d in data])
+
+    # 🧩 Fix: Move node 2 (tip) to the end of arrays
+    if 2 in node_ids:
+        idx2 = np.where(node_ids == 2)[0][0]
+        node_ids = np.concatenate((np.delete(node_ids, idx2), [2]))
+        vy = np.concatenate((np.delete(vy, idx2), [vy[idx2]]))
+        mfz = np.concatenate((np.delete(mfz, idx2), [mfz[idx2]]))
+
     x = np.linspace(0, 1, len(node_ids))
 
-    # Color mapping
-    cmap = plt.get_cmap("viridis")
-    norm = plt.Normalize(vmin=np.min(sxx), vmax=np.max(sxx))
-    colors = cmap(norm(sxx))
+    # === Plot 1: Shear Force Diagram ===
+    plt.style.use("seaborn-v0_8-whitegrid")
+    plt.figure(figsize=(8, 2.2))
+    plt.plot(x, vy / 1000, "o-", lw=2.2, color="tab:orange")
+    plt.fill_between(x, vy / 1000, 0, color="tab:orange", alpha=0.3)
+    plt.title("Shear Force Diagram (VY)", fontsize=13, weight="bold")
+    plt.xlabel("Normalized Beam Length")
+    plt.ylabel("VY [kN]")
+    plt.grid(True, linestyle="--", alpha=0.7)
+    v_path = os.path.join(WORKSPACE, "shear_diagram.png")
+    plt.tight_layout()
+    plt.savefig(v_path, dpi=200)
+    plt.close()
 
-    plt.figure(figsize=(8, 1.2))
-    for i in range(len(x) - 1):
-        plt.fill_between([x[i], x[i + 1]], 0, 1, color=colors[i])
-
-    plt.xlim(0, 1)
-    plt.ylim(0, 1)
-    plt.axis("off")
-    plt.title("Stress Distribution (σxx)", fontsize=12, weight="bold")
-
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-    sm.set_array([])
-    cbar = plt.colorbar(sm, orientation="horizontal", pad=0.2)
-    cbar.set_label("σxx [Pa]")
-
-    out_path = os.path.join(WORKSPACE, "stress_map.png")
-    plt.savefig(out_path, dpi=200, bbox_inches="tight")
+    # === Plot 2: Bending Moment Diagram ===
+    plt.figure(figsize=(8, 2.2))
+    plt.plot(x, mfz / 1000, "o-", lw=2.2, color="tab:blue")
+    plt.fill_between(x, mfz / 1000, 0, color="tab:blue", alpha=0.3)
+    plt.title("Bending Moment Diagram (MFZ)", fontsize=13, weight="bold")
+    plt.xlabel("Normalized Beam Length")
+    plt.ylabel("MZ [kN·m]")
+    plt.grid(True, linestyle="--", alpha=0.7)
+    m_path = os.path.join(WORKSPACE, "moment_diagram.png")
+    plt.tight_layout()
+    plt.savefig(m_path, dpi=200)
     plt.close()
 
     return (
-        f"✅ Stress contour saved: {out_path}\n"
-        f"📊 σxx range: {np.min(sxx):.2e} → {np.max(sxx):.2e} Pa"
+        f"✅ Internal force plots generated:\n"
+        f"🟠 Shear: {v_path}\n"
+        f"🔵 Moment: {m_path}\n"
+        f"📊 Nodes: {len(node_ids)} | "
+        f"VY range: {np.min(vy):.1f} → {np.max(vy):.1f} N | "
+        f"MFZ range: {np.min(mfz):.1f} → {np.max(mfz):.1f} N·mm"
+    )
+
+
+# ============================================================
+# 🟩 TOOL 3 — BENDING MOMENT MFY COLOR CONTOUR
+# ============================================================
+@tool("visualize_mfz_contour", return_direct=False)
+def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt") -> str:
+    """
+    Visualize bending moment MFZ along beam length as a color contour.
+    Reads POST_RELEVE_T (SIEF_ELNO) output table.
+    """
+    stress_path = os.path.join(WORKSPACE, stress_name)
+    if not os.path.exists(stress_path):
+        return f"❌ Error: file '{stress_path}' not found."
+
+    data = []
+    with open(stress_path, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            if not line.strip() or line.startswith("#") or "NOM_CHAM" in line:
+                continue
+            parts = [p.strip() for p in line.split(";")]
+            if len(parts) >= 16 and parts[1].startswith("N"):
+                try:
+                    node_id = int(parts[1][1:])
+                    x = float(parts[7])  # COOR_X (column 8)
+                    mfz = float(parts[15])  # MFZ bending moment
+                    data.append((node_id, x, mfz))
+                except Exception:
+                    continue
+
+    if len(data) == 0:
+        return f"⚠️ No MFZ data found in '{stress_name}'."
+
+    # Sort by node ID
+    data.sort(key=lambda x: x[0])
+    node_ids = np.array([d[0] for d in data])
+    x = np.array([d[1] for d in data])
+    mfz = np.array([d[2] for d in data])
+
+    # ✅ Fix beam length based on min/max x-coordinates
+    beam_length = np.max(x) - np.min(x)
+    if beam_length < 0.1:  # fallback (if X are corrupted)
+        beam_length = 4.0
+
+    # Fix: move node 2 (tip) to the end
+    if 2 in node_ids:
+        idx2 = np.where(node_ids == 2)[0][0]
+        node_ids = np.concatenate((np.delete(node_ids, idx2), [2]))
+        x = np.concatenate((np.delete(x, idx2), [x[idx2]]))
+        mfz = np.concatenate((np.delete(mfz, idx2), [mfz[idx2]]))
+
+    # ✅ Convert from N·mm → kN·m
+    mfz_kNm = mfz / 1e6 if np.max(np.abs(mfz)) > 1e5 else mfz / 1e3
+
+    # Colormap
+    cmap = plt.get_cmap("turbo")
+    norm = plt.Normalize(vmin=np.min(mfz_kNm), vmax=np.max(mfz_kNm))
+    colors = cmap(norm(mfz_kNm))
+
+    # Plot
+    plt.style.use("seaborn-v0_8-whitegrid")
+    fig, ax = plt.subplots(figsize=(8, 1.0))
+    for i in range(len(x) - 1):
+        ax.fill_between([x[i], x[i + 1]], 0, 0.5, color=colors[i], linewidth=0)
+
+    ax.set_xlim(np.min(x), np.max(x))
+    ax.set_ylim(0, 0.5)
+    ax.axis("off")
+    ax.set_title("Bending Moment Contour (MFZ)", fontsize=13, weight="bold")
+
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax, orientation="horizontal", pad=0.25)
+    cbar.set_label("MFZ [kN·m]", fontsize=10)
+
+    out_path = os.path.join(WORKSPACE, "mfz_contour.png")
+    plt.savefig(out_path, dpi=220, bbox_inches="tight")
+    plt.close()
+
+    return (
+        f"✅ MFZ contour saved: {out_path}\n"
+        f"📊 MFZ range: {np.min(mfz_kNm):.2f} → {np.max(mfz_kNm):.2f} kN·m\n"
+        f"📏 Beam length: {beam_length:.2f} m | Nodes: {len(node_ids)}"
     )

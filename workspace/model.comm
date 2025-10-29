@@ -87,7 +87,7 @@ res_stat = CALC_CHAMP(
   reuse=res_stat,
   RESULTAT=res_stat,
   FORCE=('REAC_NODA',),
-  CONTRAINTE=('EFGE_ELNO', 'SIGM_ELNO')
+  CONTRAINTE=('EFGE_ELNO', 'SIEF_ELNO')
 );
 
 # __________ Create result tables (reactions, displacements) ___
@@ -114,21 +114,28 @@ tab_disp = CREA_TABLE(
 # __________________ Print tables to text ______________________
 IMPR_TABLE(
   TABLE=tab_reac,
-  NOM_PARA=('NOEUD','DX','DY','DZ','DRX','DRY','DRZ','FX','FY','FZ','MX','MY','MZ'),
-  UNITE=18
+  UNITE=18,
+  SEPARATEUR=' ',
+  FORMAT='TABLEAU',
+  FORMAT_R='E12.5'
 );
 
 IMPR_TABLE(
   TABLE=tab_disp,
-  NOM_PARA=('NOEUD','DX','DY','DZ','DRX','DRY','DRZ'),
-  UNITE=19
+  UNITE=19,
+  SEPARATEUR=' ',
+  FORMAT='TABLEAU',
+  FORMAT_R='E12.5'
 );
 
 # __________________ Print displacement field __________________
 IMPR_RESU(
   FORMAT='RESULTAT',
   UNITE=80,
-  RESU=_F(RESULTAT=res_stat, NOM_CHAM='DEPL')
+  RESU=_F(
+    RESULTAT=res_stat,
+    NOM_CHAM='DEPL'
+  )
 );
 
 # __________________ Print local coordinate systems ____________
@@ -140,6 +147,27 @@ IMPR_CONCEPT(
   ),
   FORMAT='RESULTAT',
   UNITE=53
+);
+
+# __________________ Internal beam forces (axial/shear/bending) __________
+SIEFTAB = POST_RELEVE_T(
+  ACTION=_F(
+    INTITULE='BeamForces',
+    RESULTAT=res_stat,
+    NOM_CHAM='SIEF_ELNO',
+    GROUP_NO=('BEAM',),
+    OPERATION='EXTRACTION',
+    TOUT_ORDRE='OUI',
+    TOUT_CMP='OUI'
+  )
+);
+
+IMPR_TABLE(
+  TABLE=SIEFTAB,
+  UNITE=21,
+  SEPARATEUR=';',
+  FORMAT='TABLEAU',
+  FORMAT_R='E12.5'
 );
 
 # __________________________ End __________________________
