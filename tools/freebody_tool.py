@@ -14,33 +14,37 @@ os.makedirs(WORKSPACE, exist_ok=True)
 #  1. Parse reaction file (tab_reac.txt)
 # ------------------------------------------------------------
 def _read_reactions(reac_path):
+    """Parse tab_reac.txt from IMPR_TABLE output (Code_Aster)"""
     if not os.path.exists(reac_path):
         return None
 
-    node_line_pattern = re.compile(r"^\s*N\d+\s+")
     with open(reac_path, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
-            if node_line_pattern.match(line):
+            if re.search(r"\bN\d+\b", line):
                 parts = line.strip().split()
-                if len(parts) >= 7:
-                    try:
-                        fx = float(parts[1])
-                        fy = float(parts[2])
-                        fz = float(parts[3])
-                        mx = float(parts[4])
-                        my = float(parts[5])
-                        mz = float(parts[6])
-                        return {
-                            "node": parts[0],
-                            "Fx": fx,
-                            "Fy": fy,
-                            "Fz": fz,
-                            "Mx": mx,
-                            "My": my,
-                            "Mz": mz,
-                        }
-                    except Exception:
-                        continue
+                try:
+                    node_index = next(
+                        i for i, p in enumerate(parts) if re.match(r"N\d+", p)
+                    )
+                    node = parts[node_index]
+                    fy = float(parts[node_index + 4])  # DY
+                    mz = float(parts[-1])  # the last column DYZ
+                    fx = (
+                        float(parts[node_index + 3])
+                        if len(parts) > node_index + 3
+                        else 0.0
+                    )
+                    return {
+                        "node": node,
+                        "Fx": fx,
+                        "Fy": fy,
+                        "Fz": 0.0,
+                        "Mx": 0.0,
+                        "My": 0.0,
+                        "Mz": mz,
+                    }
+                except Exception as e:
+                    continue
     return None
 
 

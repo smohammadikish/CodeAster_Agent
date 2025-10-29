@@ -1,4 +1,3 @@
-# tools/comm_generator.py
 import os
 
 from langchain.tools import tool
@@ -95,7 +94,7 @@ res_stat = CALC_CHAMP(
   reuse=res_stat,
   RESULTAT=res_stat,
   FORCE=('REAC_NODA',),
-  CONTRAINTE=('EFGE_ELNO', 'SIGM_ELNO')
+  CONTRAINTE=('EFGE_ELNO', 'SIEF_ELNO')
 );
 
 # __________ Create result tables (reactions, displacements) ___
@@ -122,21 +121,28 @@ tab_disp = CREA_TABLE(
 # __________________ Print tables to text ______________________
 IMPR_TABLE(
   TABLE=tab_reac,
-  NOM_PARA=('NOEUD','DX','DY','DZ','DRX','DRY','DRZ','FX','FY','FZ','MX','MY','MZ'),
-  UNITE=18
+  UNITE=18,
+  SEPARATEUR=' ',
+  FORMAT='TABLEAU',
+  FORMAT_R='E12.5'
 );
 
 IMPR_TABLE(
   TABLE=tab_disp,
-  NOM_PARA=('NOEUD','DX','DY','DZ','DRX','DRY','DRZ'),
-  UNITE=19
+  UNITE=19,
+  SEPARATEUR=' ',
+  FORMAT='TABLEAU',
+  FORMAT_R='E12.5'
 );
 
 # __________________ Print displacement field __________________
 IMPR_RESU(
   FORMAT='RESULTAT',
   UNITE=80,
-  RESU=_F(RESULTAT=res_stat, NOM_CHAM='DEPL')
+  RESU=_F(
+    RESULTAT=res_stat,
+    NOM_CHAM='DEPL'
+  )
 );
 
 # __________________ Print local coordinate systems ____________
@@ -150,6 +156,27 @@ IMPR_CONCEPT(
   UNITE=53
 );
 
+# __________________ Internal beam forces (axial/shear/bending) __________
+SIEFTAB = POST_RELEVE_T(
+  ACTION=_F(
+    INTITULE='BeamForces',
+    RESULTAT=res_stat,
+    NOM_CHAM='SIEF_ELNO',
+    GROUP_NO=('BEAM',),
+    OPERATION='EXTRACTION',
+    TOUT_ORDRE='OUI',
+    TOUT_CMP='OUI'
+  )
+);
+
+IMPR_TABLE(
+  TABLE=SIEFTAB,
+  UNITE=21,
+  SEPARATEUR=';',
+  FORMAT='TABLEAU',
+  FORMAT_R='E12.5'
+);
+
 # __________________________ End __________________________
 FIN();
 """
@@ -161,27 +188,27 @@ def generate_comm_tool(
     comm_name: str = "model.comm",
     E: float = 11e9,  # Pa
     NU: float = 0.3,
-    RHO: float = 480.0,  # kg/m3
+    RHO: float = 480.0,  # kg/m³
     HY: float = 0.12,  # m
     HZ: float = 0.10,  # m
     FY: float = -1500.0,  # N
 ) -> str:
     """
-    Generate the .comm file (command input for Code_Aster).
-    Compatible with Code_Aster 14.4 Windows/Linux.
-    Includes group reconstruction (BASE, TIP, BEAM) and full output tables.
+    Generate the .comm file (Code_Aster input).
+    Compatible with Code_Aster 14.4 (Windows/Linux).
+    Includes:
+      - group reconstruction (BASE, TIP, BEAM)
+      - static analysis with beam model
+      - printed results: displacements, reactions, internal forces (N, VY, MZ)
     """
-
     med_path = os.path.join(WORKSPACE, med_name)
     comm_path = os.path.join(WORKSPACE, comm_name)
 
     if not os.path.exists(med_path):
         return f"❌ Error: mesh file '{med_path}' not found."
 
-    # Fill the template with input parameters
     content = COMM_TEMPLATE.format(E=E, NU=NU, RHO=RHO, HY=HY, HZ=HZ, FY=FY)
 
-    # Write .comm file
     with open(comm_path, "w", encoding="utf-8") as f:
         f.write(content)
 

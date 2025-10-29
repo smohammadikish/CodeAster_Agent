@@ -8,7 +8,7 @@ P mpi_nbnoeud 1
 P ncpus 1
 P nomjob beam_analysis
 P origine CodeAster_Agent
-P rep_trav C:\Users\EX-GIGI\AppData\Local\Temp\EX-GIGI-DESKTOP-MVF74MH-interactif_7479
+P rep_trav C:\Users\EX-GIGI\AppData\Local\Temp\EX-GIGI-DESKTOP-MVF74MH-interactif_6925
 P server localhost
 P time_limit 1800.0
 P tpsjob 31
@@ -22,4 +22,5 @@ F resu D:\Training_S.T.A.DATA\Project\CodeAsterAgents\workspace\beam_analysis.re
 F libr D:\Training_S.T.A.DATA\Project\CodeAsterAgents\workspace\tab_reac.txt R  18
 F libr D:\Training_S.T.A.DATA\Project\CodeAsterAgents\workspace\tab_disp.txt R  19
 F libr D:\Training_S.T.A.DATA\Project\CodeAsterAgents\workspace\local_axes.txt R  53
+F libr D:\Training_S.T.A.DATA\Project\CodeAsterAgents\workspace\tab_sie.txt R  21
 R base D:\Training_S.T.A.DATA\Project\CodeAsterAgents\workspace\beam_analysis_base R  0
