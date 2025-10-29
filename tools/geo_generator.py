@@ -11,7 +11,6 @@ SetFactory("OpenCASCADE");
 
 // Mesh settings to preserve points as nodes in MED
 Mesh.MedFileMinorVersion = 0;
-Mesh.SaveWithoutOrphans = 1;
 Mesh.MeshSizeFromPoints = 1;
 Mesh.MeshSizeFromCurvature = 0;
 Mesh.MeshSizeExtendFromBoundary = 0;

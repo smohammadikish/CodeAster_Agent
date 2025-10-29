@@ -1,7 +1,8 @@
-from typing import Any, List, Sequence, Union, Optional
+from typing import Any, List, Optional, Sequence, Union
+
 from langchain_core.language_models import BaseLanguageModel
-from langchain_core.outputs import LLMResult, ChatGeneration
-from langchain_core.messages import BaseMessage, AIMessage
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.outputs import ChatGeneration, LLMResult
 
 
 class MockLLM(BaseLanguageModel):
@@ -13,13 +14,18 @@ class MockLLM(BaseLanguageModel):
 
     def __init__(self, responses: Optional[List[str]] = None, **kwargs: Any):
         super().__init__(**kwargs)
-        object.__setattr__(self, "_responses", responses or [
-            "OK. Let's start the analysis.",
-            "Geometry created.",
-            "Mesh generated.",
-            "Simulation completed.",
-            "Results visualized.",
-        ])
+        object.__setattr__(
+            self,
+            "_responses",
+            responses
+            or [
+                "OK. Let's start the analysis.",
+                "Geometry created.",
+                "Mesh generated.",
+                "Simulation completed.",
+                "Results visualized.",
+            ],
+        )
         object.__setattr__(self, "_index", 0)
 
     def _next_text(self) -> str:
@@ -46,7 +52,9 @@ class MockLLM(BaseLanguageModel):
         """Simulate a full LLMResult generation cycle with ChatGeneration output."""
         text = self._next_text()
         return LLMResult(
-            generations=[[ChatGeneration(message=AIMessage(content=text))] for _ in prompts]
+            generations=[
+                [ChatGeneration(message=AIMessage(content=text))] for _ in prompts
+            ]
         )
 
     def generate_prompt(self, prompts: List[Any], **kwargs: Any) -> LLMResult:
@@ -64,22 +72,30 @@ class MockLLM(BaseLanguageModel):
     # ----------------------------------------------------------
     # 🧠 Message-based predictions (for chat-style interaction)
     # ----------------------------------------------------------
-    def predict_messages(self, messages: Sequence[BaseMessage], **kwargs: Any) -> BaseMessage:
+    def predict_messages(
+        self, messages: Sequence[BaseMessage], **kwargs: Any
+    ) -> BaseMessage:
         """Return the next mock message response."""
         return AIMessage(content=self._next_text())
 
-    async def apredict_messages(self, messages: Sequence[BaseMessage], **kwargs: Any) -> BaseMessage:
+    async def apredict_messages(
+        self, messages: Sequence[BaseMessage], **kwargs: Any
+    ) -> BaseMessage:
         """Async version of predict_messages."""
         return self.predict_messages(messages, **kwargs)
 
     # ----------------------------------------------------------
     # 🧠 Invoke methods for LangChain executors
     # ----------------------------------------------------------
-    def invoke(self, input: Union[str, dict, List[BaseMessage]], *args: Any, **kwargs: Any) -> str:
+    def invoke(
+        self, input: Union[str, dict, List[BaseMessage]], *args: Any, **kwargs: Any
+    ) -> str:
         """Return plain text (LangChain expects text-compatible output)."""
         return self._next_text()
 
-    async def ainvoke(self, input: Union[str, dict, List[BaseMessage]], *args: Any, **kwargs: Any) -> str:
+    async def ainvoke(
+        self, input: Union[str, dict, List[BaseMessage]], *args: Any, **kwargs: Any
+    ) -> str:
         """Async version of invoke."""
         return self._next_text()
 

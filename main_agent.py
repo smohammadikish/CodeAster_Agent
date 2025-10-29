@@ -11,13 +11,17 @@ from tools.mesher_gmsh import mesh_with_gmsh_tool
 from tools.run_aster_tool import run_code_aster_tool
 from tools.summarize_results_tool import summarize_results_tool
 from tools.validators import file_exists
-from tools.visualize_tool import visualize_resu_tool
+from tools.visualize_tool import (visualize_freebody_tool,
+                                  visualize_mfz_contour_tool,
+                                  visualize_resu_tool, visualize_stress_tool)
 
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
 
-# ✅ Only two values are retrieved (previously three were here)
+
+# ✅ Environment
 gmsh_bin, as_run_bin = load_env()
+
 
 # ------------------ Logging setup ------------------
 logging.basicConfig(
@@ -32,7 +36,13 @@ logging.info("Pipeline started.")
 def safe_call(tool_func, expected_file: str | None = None, **kwargs) -> bool:
     """Safely execute a tool, handle errors, and verify expected file."""
     print(f"\n🚀 Running: {tool_func.name}")
-    result = tool_func.run(**kwargs)
+    try:
+        tool_input = kwargs.pop("tool_input", {})
+        result = tool_func.run(tool_input=tool_input, **kwargs)
+    except Exception as e:
+        print(f"❌ Error running {tool_func.name}: {e}")
+        return False
+
     print(result)
     logging.info(f"Executed tool: {tool_func.name}")
     logging.info(result)
@@ -54,6 +64,7 @@ def run_pipeline():
     """Run Code_Aster workflow step-by-step (manual mode)."""
     print("\n=== 🧠 Starting Code_Aster pipeline (manual mode) ===\n")
 
+    # --- Preprocessing ---
     if not safe_call(
         generate_geo_tool, expected_file=os.path.join(WORKSPACE, "model.geo")
     ):
@@ -67,19 +78,40 @@ def run_pipeline():
     ):
         return
     if not safe_call(
-        generate_export_tool, expected_file=os.path.join(WORKSPACE, "job.export")
+        generate_export_tool, expected_file=os.path.join(WORKSPACE, "model.export")
     ):
         return
+
+    # --- Run Code_Aster ---
     if not safe_call(
-        run_code_aster_tool, expected_file=os.path.join(WORKSPACE, "result.mess")
+        run_code_aster_tool, expected_file=os.path.join(WORKSPACE, "beam_analysis.mess")
     ):
         return
 
-    print("\n=== 📄 Summarizing results ===")
-    print(summarize_results_tool.run())
+    # --- Summarize ---
+    # print("\n=== 📄 Summarizing results ===")
+    # print(summarize_results_tool.run())
 
+    # --- Visualizations ---
     print("\n=== 📊 Visualizing ===")
-    print(visualize_resu_tool.run())
+
+    vis_tools = [
+        (
+            "Deflection/Rotation",
+            visualize_resu_tool,
+            {"resu_name": "beam_analysis.resu"},
+        ),
+        ("Internal Forces", visualize_stress_tool, {"stress_name": "tab_sie.txt"}),
+        ("Moment Contour", visualize_mfz_contour_tool, {"stress_name": "tab_sie.txt"}),
+        ("Free Body", visualize_freebody_tool, {"reac_name": "tab_reac.txt"}),
+    ]
+
+    for title, func, args in vis_tools:
+        print(f"\n🖼 {title}")
+        try:
+            print(func.run(tool_input=args))
+        except Exception as e:
+            print(f"⚠️ Visualization '{title}' failed: {e}")
 
     print("\n🎯 Pipeline finished successfully!")
 
@@ -100,23 +132,25 @@ def run_agent_mode(llm):
         run_code_aster_tool,
         summarize_results_tool,
         visualize_resu_tool,
+        visualize_stress_tool,
+        visualize_mfz_contour_tool,
+        visualize_freebody_tool,
     ]
 
-    # ✅ Updated prompt for compatibility with new LangChain (only requires input + agent_scratchpad)
     prompt = ChatPromptTemplate.from_template(
-        # System/role instructions:
         "You are a mechanical engineering assistant that can use the provided tools "
         "to simulate, analyze, and visualize beam models using Code_Aster.\n\n"
-        # Required variables for LangChain agent:
         "User input: {input}\n"
         "{agent_scratchpad}"
     )
 
-    # ✅ Create Agent with (llm, tools, prompt)
     agent = create_tool_calling_agent(llm, tools, prompt)
     executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
-    user_prompt = "Simulate a 3-meter steel beam with 15 elements and visualize the results."
+    user_prompt = (
+        "Simulate a 3-meter steel beam with 15 elements and visualize all results "
+        "(deflection, moment, shear, and free-body)."
+    )
     result = executor.invoke({"input": user_prompt})
 
     print("\n=== 🧠 AGENT RESULT ===")
@@ -132,6 +166,7 @@ if __name__ == "__main__":
     # ✅ Try to load MockLLM (offline mode)
     try:
         from llm.mock_llm import MockLLM
+
         llm = MockLLM()
         print("🧠 Using local MockLLM (offline testing mode).")
         online = False
@@ -139,11 +174,13 @@ if __name__ == "__main__":
         print(f"⚠️ Could not load MockLLM: {e}. Trying Ollama or FakeListChatModel.")
         try:
             from langchain_ollama import ChatOllama
+
             llm = ChatOllama(model="mistral", temperature=0)
             online = True
             print("🧠 LLM model loaded (Ollama: mistral)")
         except Exception as e:
             from langchain_community.chat_models import FakeListChatModel
+
             llm = FakeListChatModel(
                 responses=[
                     "OK. Let's start the analysis.",
@@ -154,7 +191,9 @@ if __name__ == "__main__":
                 ]
             )
             online = False
-            print(f"⚠️ No local model found ({e}). Using FakeListChatModel (offline fallback).")
+            print(
+                f"⚠️ No local model found ({e}). Using FakeListChatModel (offline fallback)."
+            )
 
     # ✅ Choose execution mode
     mode = args.mode
