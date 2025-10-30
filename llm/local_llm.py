@@ -6,18 +6,13 @@ except ImportError:
     # 🔙 fallback for older LangChain versions
     from langchain.chat_models import ChatOllama
 
-
-def get_local_llm(model_name: str = "llama3", temperature: float = 0.0):
+def get_local_llm(model_name: str = "gemma:3:4b", temperature: float = 0.0):
     """
-    Load a local Ollama model (e.g. 'llama3', 'mistral', 'phi3', etc.)
-    Requires Ollama to be installed and running locally.
+    Connect to the locally running Ollama model (default: gemma:3:4b)
     """
-    llm = ChatOllama(
+    return ChatOllama(
         model=model_name,
         temperature=temperature,
-        # Optional parameters — can be adjusted if needed:
-        num_ctx=4096,  # context window size
-        base_url="http://localhost:11434",  # Ollama default port
+        base_url="http://localhost:11434",
+        num_ctx=2048,
     )
-    print(f"🧠 Local Ollama model loaded: {model_name}")
-    return llm
