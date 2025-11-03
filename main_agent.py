@@ -1,5 +1,4 @@
-# main_agent.py — Compatible with LangChain 0.2.14 & langchain-ollama 0.1.1
-
+# main_agent.py — LLM-CoPilot v2 (Guided + Semantic)
 import argparse
 import logging
 import os
@@ -83,71 +82,108 @@ def run_pipeline():
         return
 
     print("\n=== 📊 Visualizing ===")
-    vis_tools = [
-        ("Deflection/Rotation", visualize_resu_tool, {"resu_name": "beam_analysis.resu"}),
-        ("Internal Forces", visualize_stress_tool, {"stress_name": "tab_sie.txt"}),
-        ("Moment Contour", visualize_mfz_contour_tool, {"stress_name": "tab_sie.txt"}),
-        ("Free Body", visualize_freebody_tool, {"reac_name": "tab_reac.txt"}),
-    ]
-    for title, func, args in vis_tools:
-        print(f"\n🖼 {title}")
-        try:
-            print(func.invoke(args))
-        except Exception as e:
-            print(f"⚠️ Visualization '{title}' failed: {e}")
-
+    safe_call(visualize_resu_tool, expected_file=os.path.join(WORKSPACE, "beam_analysis.resu"))
     print("\n🎯 Pipeline finished successfully!")
 
 
 # ----------------------------
-# Agent (LLM) pipeline
+# LLM-CoPilot v2 (Guided + Semantic)
 # ----------------------------
 def run_agent_mode(llm):
-    """LLM-CoPilot mode: lightweight, text-driven automation."""
-    print("\n=== 🤖 Running LLM-CoPilot Mode (no LangGraph) ===\n")
+    """LLM-CoPilot v2: guided plan generation + semantic stage detection."""
+    print("\n=== 🤖 Running LLM-CoPilot Mode (Guided + Semantic) ===\n")
 
-    # Step 1 — We ask the model to give a work plan
+    # 1️⃣ System-level guidance
+    system_prompt = """
+You are a structural engineering assistant that plans and controls a Code_Aster simulation pipeline.
+
+The correct workflow always follows these ordered stages:
+1. Generate geometry (.geo) using Gmsh.
+2. Mesh the geometry to produce (.med).
+3. Create a solver input file (.comm) for Code_Aster.
+4. Generate an export file (.export) that defines run parameters.
+5. Run Code_Aster simulation.
+6. Visualize the results (.resu, .txt).
+
+Your goal is to output a short structured plan mentioning these steps clearly.
+Avoid GUI or button instructions — only mention file-based workflow.
+"""
+
     user_prompt = (
-        "Generate a short step-by-step plan to simulate a 3-meter steel beam with 15 elements "
-        "using Code_Aster. Mention which files should be created (.geo, .med, .comm, .export), "
-        "and then suggest when to run Code_Aster and visualize results."
+        "Simulate a 3-meter steel beam with 15 elements using Code_Aster. "
+        "Please provide a short plan based on the pipeline stages described above."
     )
 
+    # 2️⃣ Combine both prompts
+    full_prompt = system_prompt + "\nUser request:\n" + user_prompt
+
     try:
-        response = llm.invoke(user_prompt)
+        response = llm.invoke(full_prompt)
         plan_text = response.content if hasattr(response, "content") else str(response)
     except Exception as e:
         print(f"❌ Error invoking LLM: {e}")
         return
 
-    print("\n=== 🧠 LLM PLAN ===")
+    print("\n=== 🧠 LLM PLAN (Guided) ===")
     print(plan_text)
 
-# Step 2 — Save the program to the workspace file
+    # 3️⃣ Save plan to file
     output_path = os.path.join(WORKSPACE, "llm_plan.txt")
     with open(output_path, "w") as f:
         f.write(plan_text)
     print(f"\n📝 Plan saved to: {output_path}")
 
-# Step 3 — Auto-run based on keywords
+    # 4️⃣ Semantic keyword mapping
     steps = plan_text.lower()
 
-    def run_step_if(keyword, tool, expected_file):
-        if keyword in steps:
-            print(f"\n⚙️  Detected '{keyword}' → Running {tool.name}")
-            safe_call(tool, expected_file=expected_file)
-        else:
-            print(f"⏩ Skipping '{keyword}' (not found in LLM plan).")
+    semantic_map = {
+        "geo": ["geo", "geometry", "shape", "create beam"],
+        "med": ["med", "mesh", "meshing", "gmsh"],
+        "comm": ["comm", "command", "solver", "input file"],
+        "export": ["export", "as_run", "run file"],
+        "run": ["run", "execute", "analyze", "simulation"],
+        "visual": ["visual", "plot", "diagram", "deflection", "result", "output"],
+    }
 
-# Matching keywords to tools
-    run_step_if(".geo", generate_geo_tool, os.path.join(WORKSPACE, "model.geo"))
-    run_step_if(".med", mesh_with_gmsh_tool, os.path.join(WORKSPACE, "model.med"))
-    run_step_if(".comm", generate_comm_tool, os.path.join(WORKSPACE, "model.comm"))
-    run_step_if(".export", generate_export_tool, os.path.join(WORKSPACE, "model.export"))
-    run_step_if("run", run_code_aster_tool, os.path.join(WORKSPACE, "beam_analysis.mess"))
-    run_step_if("visual", visualize_resu_tool, os.path.join(WORKSPACE, "beam_analysis.resu"))
+    def detect(keyword_group):
+        for kw in keyword_group:
+            if kw in steps:
+                return True
+        return False
 
-    print("\n🎯 LLM-CoPilot pipeline finished successfully!\n")
+    # 5️⃣ Execute tools intelligently
+    if detect(semantic_map["geo"]):
+        safe_call(generate_geo_tool, expected_file=os.path.join(WORKSPACE, "model.geo"))
+    else:
+        print("⏩ Skipping geometry generation.")
+
+    if detect(semantic_map["med"]):
+        safe_call(mesh_with_gmsh_tool, expected_file=os.path.join(WORKSPACE, "model.med"))
+    else:
+        print("⏩ Skipping mesh generation.")
+
+    if detect(semantic_map["comm"]):
+        safe_call(generate_comm_tool, expected_file=os.path.join(WORKSPACE, "model.comm"))
+    else:
+        print("⏩ Skipping .comm creation.")
+
+    if detect(semantic_map["export"]):
+        safe_call(generate_export_tool, expected_file=os.path.join(WORKSPACE, "model.export"))
+    else:
+        print("⏩ Skipping .export creation.")
+
+    if detect(semantic_map["run"]):
+        safe_call(run_code_aster_tool, expected_file=os.path.join(WORKSPACE, "beam_analysis.mess"))
+    else:
+        print("⏩ Skipping Code_Aster run.")
+
+    if detect(semantic_map["visual"]):
+        safe_call(visualize_resu_tool, expected_file=os.path.join(WORKSPACE, "beam_analysis.resu"))
+    else:
+        print("⏩ Skipping visualization.")
+
+    print("\n🎯 Guided LLM-CoPilot pipeline completed!\n")
+
 
 # ----------------------------
 # Entry point
@@ -167,11 +203,7 @@ if __name__ == "__main__":
 
         llm = FakeListChatModel(
             responses=[
-                "OK. Let's start the analysis.",
-                "Geometry created.",
-                "Mesh done.",
-                "Simulation completed.",
-                "Visualization ready.",
+                "Step 1: Create geometry (.geo)\nStep 2: Mesh (.med)\nStep 3: Run Code_Aster\nStep 4: Visualize results",
             ]
         )
         online = False
