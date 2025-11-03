@@ -1,10 +1,13 @@
-# tools/visualize_tool.py
+# ----------------------------
+#  tools/visualize_tool.py
+# ----------------------------
+
 import os
 import re
 
 import matplotlib.pyplot as plt
 import numpy as np
-from langchain.tools import tool
+from langchain_core.tools import tool  # ✅ Updated for LangChain 1.x
 
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
@@ -27,6 +30,7 @@ def visualize_resu_tool(resu_name: str = "beam_analysis.resu") -> str:
     with open(resu_path, "r", encoding="utf-8", errors="ignore") as f:
         lines = f.readlines()
 
+    # Extract nodal displacement data (N#, DX DY DZ DRX DRY DRZ)
     node_pattern = re.compile(r"^\s*N\d+\s+")
     data = []
     for line in lines:
@@ -43,13 +47,13 @@ def visualize_resu_tool(resu_name: str = "beam_analysis.resu") -> str:
     if len(data) == 0:
         return f"⚠️ No nodal displacement data found in '{resu_name}'."
 
-    # Sort numerically by node ID
+    # Sort by node ID
     data.sort(key=lambda x: x[0])
     node_ids = np.array([d[0] for d in data])
     dy_values = np.array([d[1] for d in data])
     drz_values = np.array([d[2] for d in data])
 
-    # Reorder (move node 2 to end)
+    # Fix order: move node 2 to the end (beam tip)
     if 2 in node_ids:
         idx2 = np.where(node_ids == 2)[0][0]
         node_ids = np.concatenate((np.delete(node_ids, idx2), [2]))
@@ -120,8 +124,7 @@ def visualize_resu_tool(resu_name: str = "beam_analysis.resu") -> str:
 def visualize_stress_tool(stress_name: str = "tab_sie.txt") -> str:
     """
     Parse Code_Aster table from IMPR_TABLE (POST_RELEVE_T) output
-    and visualize internal shear force (VY) and bending moment (MFZ) along the beam.
-    Handles correct node order (N1 → N2 at the end).
+    and visualize internal shear force (VY) and bending moment (MFZ).
     """
     stress_path = os.path.join(WORKSPACE, stress_name)
     if not os.path.exists(stress_path):
@@ -135,9 +138,9 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt") -> str:
             parts = [p.strip() for p in line.split(";")]
             if len(parts) >= 16 and parts[1].startswith("N"):
                 try:
-                    node_id = int(parts[1][1:])  # remove "N"
-                    vy = float(parts[11])  # shear force
-                    mfz = float(parts[15])  # bending moment
+                    node_id = int(parts[1][1:])
+                    vy = float(parts[11])
+                    mfz = float(parts[15])
                     data.append((node_id, vy, mfz))
                 except Exception:
                     continue
@@ -145,13 +148,13 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt") -> str:
     if len(data) == 0:
         return f"⚠️ No internal force data found in '{stress_name}'."
 
-    # Sort by node ID
+    # Sort nodes numerically
     data.sort(key=lambda x: x[0])
     node_ids = np.array([d[0] for d in data])
     vy = np.array([d[1] for d in data])
     mfz = np.array([d[2] for d in data])
 
-    # 🧩 Fix: Move node 2 (tip) to the end of arrays
+    # Move node 2 (tip) to the end
     if 2 in node_ids:
         idx2 = np.where(node_ids == 2)[0][0]
         node_ids = np.concatenate((np.delete(node_ids, idx2), [2]))
@@ -160,7 +163,7 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt") -> str:
 
     x = np.linspace(0, 1, len(node_ids))
 
-    # === Plot 1: Shear Force Diagram ===
+    # === Shear Force Diagram ===
     plt.style.use("seaborn-v0_8-whitegrid")
     plt.figure(figsize=(8, 2.2))
     plt.plot(x, vy / 1000, "o-", lw=2.2, color="tab:orange")
@@ -174,7 +177,7 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt") -> str:
     plt.savefig(v_path, dpi=200)
     plt.close()
 
-    # === Plot 2: Bending Moment Diagram ===
+    # === Bending Moment Diagram ===
     plt.figure(figsize=(8, 2.2))
     plt.plot(x, mfz / 1000, "o-", lw=2.2, color="tab:blue")
     plt.fill_between(x, mfz / 1000, 0, color="tab:blue", alpha=0.3)
@@ -198,7 +201,7 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt") -> str:
 
 
 # ============================================================
-# 🟩 TOOL 3 — BENDING MOMENT MFY COLOR CONTOUR
+# 🟩 TOOL 3 — BENDING MOMENT MFZ COLOR CONTOUR
 # ============================================================
 @tool("visualize_mfz_contour", return_direct=False)
 def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt") -> str:
@@ -219,8 +222,8 @@ def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt") -> str:
             if len(parts) >= 16 and parts[1].startswith("N"):
                 try:
                     node_id = int(parts[1][1:])
-                    x = float(parts[7])  # COOR_X (column 8)
-                    mfz = float(parts[15])  # MFZ bending moment
+                    x = float(parts[7])
+                    mfz = float(parts[15])
                     data.append((node_id, x, mfz))
                 except Exception:
                     continue
@@ -228,33 +231,32 @@ def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt") -> str:
     if len(data) == 0:
         return f"⚠️ No MFZ data found in '{stress_name}'."
 
-    # Sort by node ID
+    # Sort nodes numerically
     data.sort(key=lambda x: x[0])
     node_ids = np.array([d[0] for d in data])
     x = np.array([d[1] for d in data])
     mfz = np.array([d[2] for d in data])
 
-    # ✅ Fix beam length based on min/max x-coordinates
+    # Beam length check
     beam_length = np.max(x) - np.min(x)
-    if beam_length < 0.1:  # fallback (if X are corrupted)
+    if beam_length < 0.1:
         beam_length = 4.0
 
-    # Fix: move node 2 (tip) to the end
+    # Move node 2 to end
     if 2 in node_ids:
         idx2 = np.where(node_ids == 2)[0][0]
         node_ids = np.concatenate((np.delete(node_ids, idx2), [2]))
         x = np.concatenate((np.delete(x, idx2), [x[idx2]]))
         mfz = np.concatenate((np.delete(mfz, idx2), [mfz[idx2]]))
 
-    # ✅ Convert from N·mm → kN·m
+    # Convert N·mm → kN·m
     mfz_kNm = mfz / 1e6 if np.max(np.abs(mfz)) > 1e5 else mfz / 1e3
 
-    # Colormap
     cmap = plt.get_cmap("turbo")
     norm = plt.Normalize(vmin=np.min(mfz_kNm), vmax=np.max(mfz_kNm))
     colors = cmap(norm(mfz_kNm))
 
-    # Plot
+    # Plot color contour
     plt.style.use("seaborn-v0_8-whitegrid")
     fig, ax = plt.subplots(figsize=(8, 1.0))
     for i in range(len(x) - 1):
@@ -281,13 +283,16 @@ def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt") -> str:
     )
 
 
-# =============================================================
-#                      freebody
+# ============================================================
+# 🟧 TOOL 4 — FREE-BODY DIAGRAM
+# ============================================================
+
+
 # ------------------------------------------------------------
 #  1. Parse reaction file (tab_reac.txt)
 # ------------------------------------------------------------
 def _read_reactions(reac_path):
-    """Parse tab_reac.txt from IMPR_TABLE output (Code_Aster)"""
+    """Parse tab_reac.txt from IMPR_TABLE output (Code_Aster)."""
     if not os.path.exists(reac_path):
         return None
 
@@ -300,8 +305,8 @@ def _read_reactions(reac_path):
                         i for i, p in enumerate(parts) if re.match(r"N\d+", p)
                     )
                     node = parts[node_index]
-                    fy = float(parts[node_index + 4])  # DY
-                    mz = float(parts[-1])  # the last column DYZ
+                    fy = float(parts[node_index + 4])  # DY component
+                    mz = float(parts[-1])  # Moment (DYZ column)
                     fx = (
                         float(parts[node_index + 3])
                         if len(parts) > node_index + 3
@@ -316,7 +321,7 @@ def _read_reactions(reac_path):
                         "My": 0.0,
                         "Mz": mz,
                     }
-                except Exception as e:
+                except Exception:
                     continue
     return None
 
@@ -325,7 +330,7 @@ def _read_reactions(reac_path):
 #  2. Parse beam length from .geo file
 # ------------------------------------------------------------
 def _read_beam_length(geo_path):
-    """Read beam length from Point(1) and Point(2) in .geo file"""
+    """Read beam length from Point(1) and Point(2) in .geo file."""
     if not os.path.exists(geo_path):
         return None
 
@@ -347,13 +352,12 @@ def _read_beam_length(geo_path):
 
 
 # ------------------------------------------------------------
-# 📙 3. Parse loads from .comm file
+#  3. Parse loads from .comm file
 # ------------------------------------------------------------
 def _read_loads(comm_path: str):
     """
     Parse Code_Aster .comm file and extract applied loads.
-    Looks for 'FORCE_NODALE' or 'FORCE_POUTRE' blocks
-    and finds FY=... values inside, even if multiline.
+    Detects FORCE_NODALE or FORCE_POUTRE blocks and extracts FY values.
     """
     if not os.path.exists(comm_path):
         return []
@@ -369,7 +373,7 @@ def _read_loads(comm_path: str):
     for line in lines:
         u = line.upper()
 
-        # Start detection
+        # Detect start of load blocks
         if "FORCE_NODALE" in u:
             inside_force_nodale = True
             inside_force_poutre = False
@@ -381,7 +385,7 @@ def _read_loads(comm_path: str):
             current_block = [u]
             continue
 
-        # Collect lines until block ends
+        # Collect block lines until closing parenthesis and semicolon
         if inside_force_nodale or inside_force_poutre:
             current_block.append(u)
             if ")" in u and ";" in u:
@@ -403,10 +407,10 @@ def _read_loads(comm_path: str):
 
 
 # ------------------------------------------------------------
-# 📘 4. Drawing utilities
+#  4. Drawing utilities
 # ------------------------------------------------------------
 def _draw_support(ax, x0, y0, support_type="fixed"):
-    """Draw a support symbol at (x0,y0)"""
+    """Draw a support symbol at (x0, y0)."""
     if support_type == "fixed":
         ax.add_patch(
             plt.Rectangle((x0 - 0.02, y0 - 0.1), 0.02, 0.2, color="black", alpha=0.6)
@@ -430,7 +434,7 @@ def _draw_support(ax, x0, y0, support_type="fixed"):
 
 
 def _draw_vertical_arrow(ax, x, y, magnitude, label, color="tab:blue"):
-    """Draw vertical arrow"""
+    """Draw vertical reaction arrow with label."""
     direction = 1 if magnitude >= 0 else -1
     dy = 0.25 * direction
     ax.arrow(
@@ -457,7 +461,7 @@ def _draw_vertical_arrow(ax, x, y, magnitude, label, color="tab:blue"):
 
 
 def _draw_load(ax, beam_length, loads):
-    """Draw applied loads (in red)"""
+    """Draw applied loads (in red)."""
     for load in loads:
         if load["type"] == "point":
             Fy = load["Fy"]
@@ -514,7 +518,7 @@ def _draw_load(ax, beam_length, loads):
 
 
 # ------------------------------------------------------------
-# 📗 5. Main visualization tool
+#  5. Main visualization tool
 # ------------------------------------------------------------
 @tool("visualize_freebody", return_direct=False)
 def visualize_freebody_tool(
@@ -524,7 +528,7 @@ def visualize_freebody_tool(
     comm_name: str = "model.comm",
     unit: str = "m",
 ) -> str:
-    """Draw full free-body diagram including loads and reactions"""
+    """Draw full free-body diagram including supports, loads, and reactions."""
 
     # --- Read beam length ---
     geo_path = os.path.join(WORKSPACE, geo_name)
@@ -541,15 +545,15 @@ def visualize_freebody_tool(
     comm_path = os.path.join(WORKSPACE, comm_name)
     loads = _read_loads(comm_path)
 
-    # --- Start plotting ---
+    # --- Plot setup ---
     plt.style.use("seaborn-v0_8-whitegrid")
     fig, ax = plt.subplots(figsize=(7, 2.3))
     ax.set_facecolor("white")
 
-    # Beam line
+    # Beam axis
     ax.plot([0, beam_length], [0, 0], color="black", lw=3, solid_capstyle="round")
 
-    # Support
+    # Draw support
     _draw_support(ax, x0=0.0, y0=0.0, support_type=support_type)
 
     # Reaction Force
@@ -559,7 +563,7 @@ def visualize_freebody_tool(
             ax, x=-0.05, y=0.0, magnitude=Fy, label=f"Fy={Fy/1000:.1f} kN"
         )
 
-    # Reaction Moment
+    # Reaction Moment (for fixed support)
     if support_type == "fixed":
         Mz = reac["Mz"]
         if abs(Mz) > 1e-9:
@@ -595,7 +599,7 @@ def visualize_freebody_tool(
                 fontweight="bold",
             )
 
-    # Draw applied loads (red)
+    # Draw applied loads (in red)
     if loads:
         _draw_load(ax, beam_length, loads)
 
@@ -617,7 +621,7 @@ def visualize_freebody_tool(
         color="gray",
     )
 
-    # Clean layout
+    # Final layout
     ax.set_xlim(-0.35, beam_length + 0.25)
     ax.set_ylim(-0.45, 0.55)
     ax.set_aspect("equal", adjustable="box")
@@ -628,7 +632,7 @@ def visualize_freebody_tool(
     plt.savefig(out_path, dpi=250, bbox_inches="tight")
     plt.close()
 
-    # Return summary
+    # --- Return summary info ---
     return (
         f"✅ Free-body diagram generated.\n"
         f"🖼 Image: {out_path}\n"

@@ -1,7 +1,10 @@
-# tools/export_generator.py
+# ----------------------------
+#  tools/export_generator.py
+# ----------------------------
+
 import os
 
-from langchain.tools import tool
+from langchain_core.tools import tool  # ✅ Updated import for LangChain 1.x
 
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
@@ -66,13 +69,13 @@ def generate_export_tool(
     local_axes = os.path.abspath(os.path.join(WORKSPACE, "local_axes.txt"))
     tab_sie = os.path.abspath(os.path.join(WORKSPACE, "tab_sie.txt"))
 
-    # --- Verify required files exist ---
+    # --- Validate required input files ---
     if not os.path.exists(comm_path):
         return f"❌ Error: {comm_path} not found."
     if not os.path.exists(med_path):
         return f"❌ Error: {med_path} not found."
 
-    # --- Fill template ---
+    # --- Fill the export template ---
     content = EXPORT_TEMPLATE.format(
         job_name=job_name,
         comm_path=comm_path,
@@ -86,10 +89,11 @@ def generate_export_tool(
         base_path=base_path,
     )
 
-    # --- Write export file ---
+    # --- Write the export file to disk ---
     with open(export_path, "w", encoding="utf-8") as f:
         f.write(content)
 
+    # --- Return status summary ---
     return (
         f"✅ Generated {export_name}\n"
         f"📄 Job name: {job_name}\n"

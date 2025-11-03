@@ -1,10 +1,15 @@
+# ----------------------------
+#  tools/comm_generator.py
+# ----------------------------
+
 import os
 
-from langchain.tools import tool
+from langchain_core.tools import tool  # ✅ Updated import for LangChain 1.x
 
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
 
+# Template for Code_Aster .comm file generation
 COMM_TEMPLATE = r"""
 # __________________________ Start __________________________
 DEBUT(PAR_LOT='NON');
@@ -186,12 +191,12 @@ FIN();
 def generate_comm_tool(
     med_name: str = "model.med",
     comm_name: str = "model.comm",
-    E: float = 11e9,  # Pa
-    NU: float = 0.3,
-    RHO: float = 480.0,  # kg/m³
-    HY: float = 0.12,  # m
-    HZ: float = 0.10,  # m
-    FY: float = -1500.0,  # N
+    E: float = 11e9,  # Pa (Elastic modulus)
+    NU: float = 0.3,  # Poisson's ratio
+    RHO: float = 480.0,  # kg/m³ (Density)
+    HY: float = 0.12,  # m (Beam height)
+    HZ: float = 0.10,  # m (Beam width)
+    FY: float = -1500.0,  # N (Vertical load at tip)
 ) -> str:
     """
     Generate the .comm file (Code_Aster input).
@@ -201,17 +206,21 @@ def generate_comm_tool(
       - static analysis with beam model
       - printed results: displacements, reactions, internal forces (N, VY, MZ)
     """
+    # --- Verify that mesh file exists ---
     med_path = os.path.join(WORKSPACE, med_name)
     comm_path = os.path.join(WORKSPACE, comm_name)
 
     if not os.path.exists(med_path):
         return f"❌ Error: mesh file '{med_path}' not found."
 
+    # --- Fill the template with input parameters ---
     content = COMM_TEMPLATE.format(E=E, NU=NU, RHO=RHO, HY=HY, HZ=HZ, FY=FY)
 
+    # --- Write the .comm file ---
     with open(comm_path, "w", encoding="utf-8") as f:
         f.write(content)
 
+    # --- Return success message ---
     return (
         f"✅ Generated {comm_name} successfully.\n"
         f"Material: E={E:.2e}, ν={NU}, ρ={RHO}\n"

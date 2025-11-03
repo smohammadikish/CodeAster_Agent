@@ -1,7 +1,11 @@
+# ----------------------------
+#  test/test_comm.py
+# ----------------------------
+
 from tools.comm_generator import generate_comm_tool
 
-print(
-    generate_comm_tool.invoke(
+if __name__ == "__main__":
+    result = generate_comm_tool.invoke(
         {
             "med_name": "model.med",
             "comm_name": "model.comm",
@@ -13,4 +17,4 @@ print(
             "FY": -1500.0,
         }
     )
-)
+    print(result)

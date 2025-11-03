@@ -1,6 +1,7 @@
 # server.py
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+
 from main_agent import run_agent_mode  # your existing function
 
 app = FastAPI()
@@ -14,9 +15,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/")
 def home():
     return {"message": "✅ FastAPI backend is running."}
+
 
 @app.post("/copilot")
 async def copilot_endpoint(request: Request):

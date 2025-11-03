@@ -1,7 +1,10 @@
-# tools/geo_generator.py
+# ----------------------------
+#  tools/geo_generator.py
+# ----------------------------
+
 import os
 
-from langchain.tools import tool
+from langchain_core.tools import tool  # ✅ Compatible with LangChain 1.x
 
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
@@ -39,10 +42,9 @@ def generate_geo_tool(
     geo_name: str = "model.geo",
 ) -> str:
     """
-    Generate the .geo file for a 1D cantilever beam.
-    Compatible with Code_Aster 14 and Gmsh → MED v4.0.
+    Generate a .geo file for a 1D cantilever beam (OpenCASCADE + Gmsh).
+    Compatible with Code_Aster 14+ and MED v4.0.
     """
-
     # --- Input validation ---
     if length_m <= 0:
         return "❌ Error: Beam length must be > 0."
@@ -54,6 +56,7 @@ def generate_geo_tool(
     if n_elems < 1:
         return "❌ Error: n_elems must be >= 1."
 
+    # --- Generate geometry ---
     n_nodes = n_elems + 1
     geo_path = os.path.join(WORKSPACE, geo_name)
     content = GEO_TEMPLATE.format(length=length_m, n_nodes=n_nodes)
@@ -65,5 +68,5 @@ def generate_geo_tool(
         f"✅ Generated {geo_name}\n"
         f"Length = {length_m} m, Elements = {n_elems}, Nodes = {n_nodes}\n"
         "Groups defined: BASE, TIP, BEAM\n"
-        f"→ Saved to {geo_path}"
+        f"→ Saved to {os.path.abspath(geo_path)}"
     )
