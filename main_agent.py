@@ -1,7 +1,8 @@
-# main_agent.py — LLM-CoPilot v2 (Guided + Semantic)
+# main_agent.py — Real LangChain Agent (ReAct via LangGraph)
 import argparse
 import logging
 import os
+
 
 from env_loader import load_env
 from tools.comm_generator import generate_comm_tool
@@ -17,26 +18,30 @@ from tools.visualize_tool import (
 )
 from tools.validators import file_exists
 
+
 # ----------------------------
 # Environment setup
 # ----------------------------
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
-gmsh_bin, as_run_bin = load_env()
+gmsh_bin, as_run_bin, ollama_url = load_env()
+
 
 # ----------------------------
 # Logging setup
 # ----------------------------
 logging.basicConfig(
-    filename=os.path.join(WORKSPACE, "pipeline.log"),
+    filename=os.path.join(WORKSPACE, "agent_pipeline.log"),
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-logging.info("Pipeline started.")
+logging.info("Pipeline started (LangChain Agent mode).")
+
+
 
 
 # ----------------------------
-# Helper
+# Safe execution wrapper
 # ----------------------------
 def safe_call(tool_func, expected_file: str | None = None, **kwargs) -> bool:
     """Safely execute a tool, handle errors, and verify expected file."""
@@ -48,27 +53,34 @@ def safe_call(tool_func, expected_file: str | None = None, **kwargs) -> bool:
         print(f"❌ Error running {tool_func.name}: {e}")
         return False
 
+
     print(result)
     logging.info(f"Executed tool: {tool_func.name}")
     logging.info(result)
+
 
     if "Error" in str(result) or "❌" in str(result):
         print(f"❌ {tool_func.name} failed — stopping pipeline.")
         return False
 
+
     if expected_file and not file_exists(expected_file):
         print(f"⚠️ Expected file not found: {expected_file}")
         return False
+
 
     print(f"✅ Step '{tool_func.name}' completed successfully.\n")
     return True
 
 
+
+
 # ----------------------------
-# Manual pipeline
+# Manual pipeline (for fallback)
 # ----------------------------
 def run_pipeline():
     print("\n=== 🧠 Starting Code_Aster pipeline (manual mode) ===\n")
+
 
     if not safe_call(generate_geo_tool, expected_file=os.path.join(WORKSPACE, "model.geo")):
         return
@@ -80,109 +92,94 @@ def run_pipeline():
         return
     if not safe_call(run_code_aster_tool, expected_file=os.path.join(WORKSPACE, "beam_analysis.mess")):
         return
-
-    print("\n=== 📊 Visualizing ===")
-    safe_call(visualize_resu_tool, expected_file=os.path.join(WORKSPACE, "beam_analysis.resu"))
-    print("\n🎯 Pipeline finished successfully!")
-
-
-# ----------------------------
-# LLM-CoPilot v2 (Guided + Semantic)
-# ----------------------------
-def run_agent_mode(llm):
-    """LLM-CoPilot v2: guided plan generation + semantic stage detection."""
-    print("\n=== 🤖 Running LLM-CoPilot Mode (Guided + Semantic) ===\n")
-
-    # 1️⃣ System-level guidance
-    system_prompt = """
-You are a structural engineering assistant that plans and controls a Code_Aster simulation pipeline.
-
-The correct workflow always follows these ordered stages:
-1. Generate geometry (.geo) using Gmsh.
-2. Mesh the geometry to produce (.med).
-3. Create a solver input file (.comm) for Code_Aster.
-4. Generate an export file (.export) that defines run parameters.
-5. Run Code_Aster simulation.
-6. Visualize the results (.resu, .txt).
-
-Your goal is to output a short structured plan mentioning these steps clearly.
-Avoid GUI or button instructions — only mention file-based workflow.
-"""
-
-    user_prompt = (
-        "Simulate a 3-meter steel beam with 15 elements using Code_Aster. "
-        "Please provide a short plan based on the pipeline stages described above."
-    )
-
-    # 2️⃣ Combine both prompts
-    full_prompt = system_prompt + "\nUser request:\n" + user_prompt
-
-    try:
-        response = llm.invoke(full_prompt)
-        plan_text = response.content if hasattr(response, "content") else str(response)
-    except Exception as e:
-        print(f"❌ Error invoking LLM: {e}")
+    if not safe_call(visualize_resu_tool, expected_file=os.path.join(WORKSPACE, "beam_analysis.resu")):
         return
 
-    print("\n=== 🧠 LLM PLAN (Guided) ===")
-    print(plan_text)
 
-    # 3️⃣ Save plan to file
-    output_path = os.path.join(WORKSPACE, "llm_plan.txt")
-    with open(output_path, "w") as f:
-        f.write(plan_text)
-    print(f"\n📝 Plan saved to: {output_path}")
+    print("\n🎯 Manual pipeline finished successfully!\n")
 
-    # 4️⃣ Semantic keyword mapping
-    steps = plan_text.lower()
 
-    semantic_map = {
-        "geo": ["geo", "geometry", "shape", "create beam"],
-        "med": ["med", "mesh", "meshing", "gmsh"],
-        "comm": ["comm", "command", "solver", "input file"],
-        "export": ["export", "as_run", "run file"],
-        "run": ["run", "execute", "analyze", "simulation"],
-        "visual": ["visual", "plot", "diagram", "deflection", "result", "output"],
-    }
 
-    def detect(keyword_group):
-        for kw in keyword_group:
-            if kw in steps:
-                return True
-        return False
 
-    # 5️⃣ Execute tools intelligently
-    if detect(semantic_map["geo"]):
-        safe_call(generate_geo_tool, expected_file=os.path.join(WORKSPACE, "model.geo"))
-    else:
-        print("⏩ Skipping geometry generation.")
+# ----------------------------
+# LangChain Agent Mode (ReAct via LangGraph)
+# ----------------------------
+def run_agent_mode(llm):
+    """Run a real LangChain ReAct agent that uses the Code_Aster tools autonomously."""
+    from langgraph.prebuilt import create_react_agent
 
-    if detect(semantic_map["med"]):
-        safe_call(mesh_with_gmsh_tool, expected_file=os.path.join(WORKSPACE, "model.med"))
-    else:
-        print("⏩ Skipping mesh generation.")
 
-    if detect(semantic_map["comm"]):
-        safe_call(generate_comm_tool, expected_file=os.path.join(WORKSPACE, "model.comm"))
-    else:
-        print("⏩ Skipping .comm creation.")
+    print("\n=== 🤖 Running REAL LangChain Agent (ReAct via LangGraph) ===\n")
 
-    if detect(semantic_map["export"]):
-        safe_call(generate_export_tool, expected_file=os.path.join(WORKSPACE, "model.export"))
-    else:
-        print("⏩ Skipping .export creation.")
 
-    if detect(semantic_map["run"]):
-        safe_call(run_code_aster_tool, expected_file=os.path.join(WORKSPACE, "beam_analysis.mess"))
-    else:
-        print("⏩ Skipping Code_Aster run.")
+    # 1️⃣ Register tools (already built with LangChain tool interface)
+    tools = [
+        generate_geo_tool,
+        mesh_with_gmsh_tool,
+        generate_comm_tool,
+        generate_export_tool,
+        run_code_aster_tool,
+        visualize_resu_tool,
+        visualize_stress_tool,
+        visualize_mfz_contour_tool,
+        visualize_freebody_tool,
+    ]
 
-    if detect(semantic_map["visual"]):
-        safe_call(visualize_resu_tool, expected_file=os.path.join(WORKSPACE, "beam_analysis.resu"))
-    else:
-        print("⏩ Skipping visualization.")
 
-    print("\n🎯 Guided LLM-CoPilot pipeline completed!\n")
+    # 2️⃣ Create the ReAct agent graph
+    agent = create_react_agent(llm, tools)
+
+
+    # 3️⃣ Define high-level workflow guidance
+    workflow_rules = """
+You are a structural engineering assistant controlling a Code_Aster simulation pipeline.
+Follow this exact workflow:
+1. Generate geometry (.geo)
+2. Mesh the geometry (.med)
+3. Create solver input (.comm)
+4. Create export file (.export)
+5. Run Code_Aster simulation
+6. Visualize results (.resu, .txt)
+
+
+Use ONLY the provided tools, in the given order.
+If one tool fails, stop and report the cause clearly.
+Do not suggest GUI steps or manual edits — only file-based commands.
+If visualization tools are available, produce deflection and moment plots.
+"""
+
+
+    # 4️⃣ User task
+    user_task = (
+        "Simulate a 3-meter steel beam with 15 elements using Code_Aster, "
+        "and visualize deflection, moment, and free-body diagrams."
+    )
+
+
+    # 5️⃣ Compose agent input
+    full_input = f"{workflow_rules}\n\nUser request:\n{user_task}"
+
+
+    # 6️⃣ Run the agent (the agent will choose tools autonomously)
+    print("🤔 Agent reasoning and tool selection in progress...\n")
+    result = agent.invoke({"messages": [("user", full_input)]})
+
+
+    # 7️⃣ Display final message
+    try:
+        print("\n=== 🧠 AGENT FINAL MESSAGE ===")
+        print(result["messages"][-1].content)
+    except Exception:
+        print(result)
+
+
+    # 8️⃣ Save reasoning trace
+    trace_path = os.path.join(WORKSPACE, "agent_trace.log")
+    with open(trace_path, "w") as f:
+        f.write(str(result))
+    print(f"\n📄 Agent reasoning trace saved to: {trace_path}")
+
+
 
 
 # ----------------------------
@@ -193,22 +190,34 @@ if __name__ == "__main__":
     parser.add_argument("--mode", choices=["agent", "manual", "auto"], default="auto")
     args = parser.parse_args()
 
+
     try:
         from langchain_ollama import ChatOllama
-        llm = ChatOllama(model="tinyllama:latest", temperature=0)
+
+
+        # Use a chat-capable model for agent (e.g., llama3)
+        llm = ChatOllama(model="mistral:latest", temperature=0, base_url=ollama_url)
+        print(f"🔗 Connected to Ollama at {ollama_url}")
         online = True
-        print("🧠 LLM model loaded (Ollama: tinyllama)")
+        print("🧠 LLM model loaded (Ollama: mistral:latest)")
     except Exception as e:
         from langchain_community.chat_models import FakeListChatModel
 
+
         llm = FakeListChatModel(
             responses=[
-                "Step 1: Create geometry (.geo)\nStep 2: Mesh (.med)\nStep 3: Run Code_Aster\nStep 4: Visualize results",
+                "Starting simulation.",
+                "Geometry generated.",
+                "Mesh created.",
+                "Simulation done.",
+                "Visualization ready.",
             ]
         )
         online = False
         print(f"⚠️ Ollama not available ({e}). Using FakeListChatModel fallback.")
 
+
+    # Run in chosen mode
     if args.mode == "agent" or (args.mode == "auto" and online):
         run_agent_mode(llm)
     else:
