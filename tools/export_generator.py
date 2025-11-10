@@ -1,14 +1,18 @@
-# ----------------------------
+# --------------------------------------------------------
 #  tools/export_generator.py
-# ----------------------------
+#  Responsible for generating Code_Aster .export file
+# --------------------------------------------------------
 
 import os
 
 from langchain_core.tools import tool  # ✅ Updated import for LangChain 1.x
 
+# Workspace directory where files will be stored
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
 
+
+# Template of Code_Aster export file
 EXPORT_TEMPLATE = """# --- Code_Aster Export File ---
 P actions make_etude
 P debug nodebug
@@ -32,7 +36,7 @@ A tpmax 1800.0
 F comm {comm_path} D 1
 F libr {med_path} D 20
 
-# Optional result tables and logs
+# Optional result tables and logs (created by visualize tools)
 F mess {mess_path} R 6
 F resu {resu_path} R 80
 F libr {tab_reac} R 18
@@ -40,7 +44,7 @@ F libr {tab_disp} R 19
 F libr {local_axes} R 53
 F libr {tab_sie} R 21
 
-# --- Base directory for temporary data ---
+# Base directory for temporary Code_Aster data
 R base {base_path} R 0
 """
 
@@ -53,29 +57,43 @@ def generate_export_tool(
     export_name: str = "model.export",
 ) -> str:
     """
-    Generate a Code_Aster .export file with absolute paths (cross-platform).
-    Compatible with Code_Aster 14 (as_run / as_run.bat).
+    Generates a Code_Aster .export file used by as_run.
+    Ensures correct file paths for COMM, MED, and result output files.
+
+    Args:
+        job_name (str): Name of the Code_Aster job
+        comm_name (str): Name of .comm file generated earlier
+        med_name (str): Name of .med mesh file from Gmsh
+        export_name (str): Output export filename
+
+    Returns:
+        str: Success or error message
     """
 
-    # --- Build absolute paths ---
+    # Build absolute paths
     comm_path = os.path.abspath(os.path.join(WORKSPACE, comm_name))
     med_path = os.path.abspath(os.path.join(WORKSPACE, med_name))
     export_path = os.path.abspath(os.path.join(WORKSPACE, export_name))
+
+    # Output files for Code_Aster logs and results
     mess_path = os.path.abspath(os.path.join(WORKSPACE, f"{job_name}.mess"))
     resu_path = os.path.abspath(os.path.join(WORKSPACE, f"{job_name}.resu"))
     base_path = os.path.abspath(os.path.join(WORKSPACE, f"{job_name}_base"))
+
+    # Intermediate tables used by visualization tools
     tab_reac = os.path.abspath(os.path.join(WORKSPACE, "tab_reac.txt"))
     tab_disp = os.path.abspath(os.path.join(WORKSPACE, "tab_disp.txt"))
     local_axes = os.path.abspath(os.path.join(WORKSPACE, "local_axes.txt"))
     tab_sie = os.path.abspath(os.path.join(WORKSPACE, "tab_sie.txt"))
 
-    # --- Validate required input files ---
+    # Verify existence of required input files
     if not os.path.exists(comm_path):
         return f"❌ Error: {comm_path} not found."
+
     if not os.path.exists(med_path):
         return f"❌ Error: {med_path} not found."
 
-    # --- Fill the export template ---
+    # Fill template with correct paths
     content = EXPORT_TEMPLATE.format(
         job_name=job_name,
         comm_path=comm_path,
@@ -89,24 +107,8 @@ def generate_export_tool(
         base_path=base_path,
     )
 
-    # --- Write the export file to disk ---
+    # Write .export file
     with open(export_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    # --- Return status summary ---
-    return (
-        f"✅ Generated {export_name}\n"
-        f"📄 Job name: {job_name}\n"
-        f"🗂 Export file: {export_path}\n"
-        f"Includes:\n"
-        f"  • COMM file: {comm_path}\n"
-        f"  • MED mesh: {med_path}\n"
-        f"  • MESS log: {mess_path}\n"
-        f"  • RESU results: {resu_path}\n"
-        f"  • TAB_REAC: {tab_reac}\n"
-        f"  • TAB_DISP: {tab_disp}\n"
-        f"  • LOCAL_AXES: {local_axes}\n"
-        f"  • tab_sie: {tab_sie}\n"
-        f"  • BASE dir: {base_path}\n"
-        "→ Ready to run via `as_run model.export` or `as_run.bat model.export`"
-    )
+    return f"✅ Export file generated: {export_path}"

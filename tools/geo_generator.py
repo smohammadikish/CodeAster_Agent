@@ -1,5 +1,5 @@
 # ----------------------------
-#  tools/geo_generator.py
+#  tools/geo_generator.py (updated, same output format)
 # ----------------------------
 
 import os
@@ -9,6 +9,7 @@ from langchain_core.tools import tool  # ✅ Compatible with LangChain 1.x
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
 
+# Template for 1D beam geometry (OpenCASCADE)
 GEO_TEMPLATE = """// ---- 1D Beam geometry (OpenCASCADE) ----
 SetFactory("OpenCASCADE");
 
@@ -45,25 +46,28 @@ def generate_geo_tool(
     Generate a .geo file for a 1D cantilever beam (OpenCASCADE + Gmsh).
     Compatible with Code_Aster 14+ and MED v4.0.
     """
-    # --- Input validation ---
+
+    # --- Validation ---
     if length_m <= 0:
         return "❌ Error: Beam length must be > 0."
 
-    # Estimate number of elements if not provided
     if n_elems is None:
+        # default approx. 0.2 m element length
         n_elems = max(2, int(length_m / 0.2))
 
     if n_elems < 1:
         return "❌ Error: n_elems must be >= 1."
 
-    # --- Generate geometry ---
-    n_nodes = n_elems + 1
+    # --- File paths ---
     geo_path = os.path.join(WORKSPACE, geo_name)
-    content = GEO_TEMPLATE.format(length=length_m, n_nodes=n_nodes)
+    n_nodes = n_elems + 1
 
+    # --- Create .geo file ---
+    content = GEO_TEMPLATE.format(length=length_m, n_nodes=n_nodes)
     with open(geo_path, "w", encoding="utf-8") as f:
         f.write(content)
 
+    # --- Return summary ---
     return (
         f"✅ Generated {geo_name}\n"
         f"Length = {length_m} m, Elements = {n_elems}, Nodes = {n_nodes}\n"

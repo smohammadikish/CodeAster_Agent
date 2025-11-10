@@ -1,33 +1,26 @@
-# --- Code_Aster Export File ---
-P actions make_etude
-P debug nodebug
-P memjob 4194304
-P memory_limit 4096.0
-P mode interactif
-P mpi_nbcpu 1
-P mpi_nbnoeud 1
-P ncpus 1
-P nomjob beam_analysis
-P origine CodeAster_Agent
-P server localhost
-P time_limit 1800.0
-P tpsjob 32
-P version stable
-
-A memjeveux 256.0
-A tpmax 1800.0
-
-# --- File Associations ---
-F comm /Users/amiryarmohamadi/codeaster_agent/workspace/model.comm D 1
-F libr /Users/amiryarmohamadi/codeaster_agent/workspace/model.med D 20
-
-# Optional result tables and logs
-F mess /Users/amiryarmohamadi/codeaster_agent/workspace/beam_analysis.mess R 6
-F resu /Users/amiryarmohamadi/codeaster_agent/workspace/beam_analysis.resu R 80
-F libr /Users/amiryarmohamadi/codeaster_agent/workspace/tab_reac.txt R 18
-F libr /Users/amiryarmohamadi/codeaster_agent/workspace/tab_disp.txt R 19
-F libr /Users/amiryarmohamadi/codeaster_agent/workspace/local_axes.txt R 53
-F libr /Users/amiryarmohamadi/codeaster_agent/workspace/tab_sie.txt R 21
-
-# --- Base directory for temporary data ---
-R base /Users/amiryarmohamadi/codeaster_agent/workspace/beam_analysis_base R 0
+P actions make_etude
+P debug nodebug
+P memjob 4194304
+P memory_limit 4096.0
+P mode interactif
+P mpi_nbcpu 1
+P mpi_nbnoeud 1
+P ncpus 1
+P nomjob beam_job
+P origine CodeAster_Agent
+P rep_trav C:\Users\EX-GIGI\AppData\Local\Temp\EX-GIGI-DESKTOP-MVF74MH-interactif_5001
+P server localhost
+P time_limit 1800.0
+P tpsjob 31
+P version stable
+A memjeveux 512.0
+A tpmax 1800.0
+F comm D:\Training_S.T.A.DATA\Project\Version 0.2.0\workspace\model.comm D  1
+F libr D:\Training_S.T.A.DATA\Project\Version 0.2.0\workspace\model.med D  20
+F mess D:\Training_S.T.A.DATA\Project\Version 0.2.0\workspace\beam_job.mess R  6
+F resu D:\Training_S.T.A.DATA\Project\Version 0.2.0\workspace\beam_job.resu R  80
+F libr D:\Training_S.T.A.DATA\Project\Version 0.2.0\workspace\tab_reac.txt R  18
+F libr D:\Training_S.T.A.DATA\Project\Version 0.2.0\workspace\tab_disp.txt R  19
+F libr D:\Training_S.T.A.DATA\Project\Version 0.2.0\workspace\local_axes.txt R  53
+F libr D:\Training_S.T.A.DATA\Project\Version 0.2.0\workspace\tab_sie.txt R  21
+R base D:\Training_S.T.A.DATA\Project\Version 0.2.0\workspace\beam_job_base R  0

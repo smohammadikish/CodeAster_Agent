@@ -27,7 +27,7 @@ model = AFFE_MODELE(
 );
 
 # ____________________ Define material ________________________
-mat = DEFI_MATERIAU(ELAS=_F(E=11000000000.0, NU=0.3, RHO=480.0));
+mat = DEFI_MATERIAU(ELAS=_F(E=210000000000.0, NU=0.3, RHO=7850.0));
 
 mater = AFFE_MATERIAU(
   MAILLAGE=mesh,
@@ -41,7 +41,7 @@ cara = AFFE_CARA_ELEM(
     GROUP_MA=('BEAM',),
     SECTION='RECTANGLE',
     CARA=('HY','HZ'),
-    VALE=(0.12, 0.1)
+    VALE=(0.2, 0.1)
   )
 );
 

@@ -1,14 +1,15 @@
 # ----------------------------
-#  tools/run_aster_tool.py
+#  tools/run_aster_tool.py (final fixed)
 # ----------------------------
 
 import os
 import platform
+import shutil  # ✅ added for which()
 import subprocess
 
-from langchain_core.tools import tool  # ✅ Updated for LangChain 1.x
+from langchain_core.tools import tool
 
-from env_loader import load_env  # Reads AS_RUN_BIN from .env
+from env_loader import load_env
 
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
@@ -18,61 +19,71 @@ os.makedirs(WORKSPACE, exist_ok=True)
 def run_code_aster_tool(export_name: str = "model.export") -> str:
     """
     Run the Code_Aster solver using the generated export file.
-    Compatible with Code_Aster 14 (Windows/Linux/macOS).
-    Produces .mess (log) and .resu (results) files.
+    Works on Windows (.bat) and Linux (as_run).
+    Produces .mess and .resu inside workspace folder.
     """
 
-    # --- Read configuration from environment ---
-    _, as_run_bin = load_env()
+    # --- Load environment ---
+    _, as_run_bin, *_ = load_env()
     export_path = os.path.abspath(os.path.join(WORKSPACE, export_name))
 
-    # --- Validate that export file exists ---
     if not os.path.exists(export_path):
         return f"❌ Error: Export file not found:\n{export_path}"
 
-    # --- Detect platform and choose proper command ---
+    # --- Platform command ---
     system = platform.system().lower()
     if system.startswith("win"):
-        # Windows uses .bat wrapper
-        cmd = [as_run_bin or "as_run.bat", "--run", export_path]
+        as_run_bin = as_run_bin or "as_run.bat"
+        if not as_run_bin.lower().endswith(".bat"):
+            as_run_bin += ".bat"
+        cmd = [as_run_bin, export_path]
     else:
-        # Linux / macOS direct execution
         cmd = [as_run_bin or "as_run", export_path]
 
-    try:
-        # --- Execute Code_Aster process ---
-        result = subprocess.run(cmd, capture_output=True, text=True)
-
-        # --- Handle errors ---
-        if result.returncode != 0:
-            return (
-                "⚠️ Code_Aster run failed.\n"
-                f"Command: {' '.join(cmd)}\n"
-                f"stderr:\n{result.stderr}\n"
-                f"stdout:\n{result.stdout}"
-            )
-
-        # --- Build paths for generated output files ---
-        job_base = os.path.splitext(os.path.basename(export_name))[0]
-        log_file = os.path.abspath(os.path.join(WORKSPACE, f"{job_base}.mess"))
-        resu_file = os.path.abspath(os.path.join(WORKSPACE, f"{job_base}.resu"))
-
-        # --- Prepare success message with brief output snippet ---
-        msg = "✅ Code_Aster run completed successfully.\n"
-        msg += f"Export file: {export_path}\n"
-        msg += f"Results file: {resu_file}\n"
-        msg += f"Log file: {log_file}\n\n"
-        msg += f"--- First lines of output ---\n{result.stdout[:600]}..."
-        return msg
-
-    except FileNotFoundError:
-        # --- Handle missing Code_Aster binary ---
+    # --- Verify binary existence ---
+    if shutil.which(cmd[0]) is None:
         return (
-            f"❌ Error: '{cmd[0]}' not found.\n"
-            "Please check that Code_Aster is installed and AS_RUN_BIN in .env is correct.\n"
-            "Example:\nAS_RUN_BIN=C:\\Program Files\\Code_Aster\\bin\\as_run.bat"
+            f"❌ Code_Aster binary not found: {cmd[0]}\n"
+            "Please check AS_RUN_BIN in your .env file.\n"
+            "Example:\n"
+            "  AS_RUN_BIN=C:\\Program Files\\Code_Aster\\bin\\as_run.bat\n"
+            "  or /usr/bin/as_run"
         )
 
+    try:
+        print(f"🔧 Running Code_Aster: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            cwd=WORKSPACE,
+            capture_output=True,
+            text=True,
+            shell=system.startswith("win"),
+        )
+
+        if result.returncode != 0:
+            return (
+                f"⚠️ Code_Aster run failed (exit {result.returncode}).\n"
+                f"stderr:\n{result.stderr}\nstdout:\n{result.stdout}"
+            )
+
+        # --- Output files ---
+        job_name = os.path.splitext(os.path.basename(export_name))[0]
+        mess = os.path.join(WORKSPACE, f"{job_name}.mess")
+        resu = os.path.join(WORKSPACE, f"{job_name}.resu")
+
+        msg = [
+            "✅ Code_Aster run completed successfully.",
+            f"Export: {export_path}",
+            f"MESS: {mess if os.path.exists(mess) else '(missing)'}",
+            f"RESU: {resu if os.path.exists(resu) else '(missing)'}",
+            "\n--- First lines of output ---\n",
+            result.stdout[:500] + ("..." if len(result.stdout) > 500 else ""),
+        ]
+        return "\n".join(msg)
+
+    except FileNotFoundError:
+        return f"❌ as_run not found: {cmd[0]} — check AS_RUN_BIN in .env"
+
     except Exception as e:
-        # --- Generic unexpected exception ---
-        return f"❌ Unexpected exception while running Code_Aster: {e}"
+        return f"❌ Unexpected error running Code_Aster: {e}"
