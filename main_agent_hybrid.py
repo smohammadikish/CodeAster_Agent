@@ -79,7 +79,7 @@ def robust_extract_json(text: str) -> Dict[str, Any]:
 
 
 def coerce_params(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensure numeric values and defaults."""
+    """Ensure numeric values and apply defaults for missing keys."""
     out = dict(DEFAULT_PARAMS)
 
     def f(x, default):
@@ -121,7 +121,7 @@ def safe_call(tool_func, expected_file=None, **kwargs):
 
 
 # ============================================================
-#  Parameter extraction (LangChain 0.3.x)
+#  Parameter extraction (non-interactive, one-shot)
 # ============================================================
 def extract_params_with_openai(user_prompt: str) -> Dict[str, Any]:
     """
@@ -133,18 +133,17 @@ def extract_params_with_openai(user_prompt: str) -> Dict[str, Any]:
     - The LLM MUST NOT return parameters the user didn't mention.
     - Missing parameters will automatically fall back to defaults via `coerce_params()`.
     """
-
     from langchain_core.messages import HumanMessage
     from langchain_openai import ChatOpenAI
 
     llm = ChatOpenAI(
-        model=openai_model or "gpt-5-mini",
+        model="gpt-4.1",
         api_key=openai_key,
         temperature=0,
-        max_tokens=300,
+        max_tokens=800,
+        extra_headers={"x-openai-web-search": "true"},
     )
 
-    # ✅ New prompt enforcing the rule "send ONLY parameters user explicitly defines"
     system_instruction = (
         "You are a mechanical simulation assistant.\n"
         "Extract ONLY the numeric parameters explicitly mentioned by the user.\n"
@@ -170,11 +169,257 @@ def extract_params_with_openai(user_prompt: str) -> Dict[str, Any]:
         print("⚠️ Could not parse JSON — using defaults from DEFAULT_PARAMS.")
         return dict(DEFAULT_PARAMS)
 
-    # ✅ merge explicit values with defaults
     params = coerce_params(raw)
-
     print("📦 Parameters going into pipeline:", params)
     return params
+
+
+# ============================================================
+#  INTERACTIVE PARAMETER EXTRACTION (chat mode)
+# ============================================================
+def _parse_value_with_unit(answer: str, expected_unit: str) -> float:
+    """
+    Parse a numeric value + unit from user answer.
+    expected_unit:
+      - 'm'  → meters
+      - 'N'  → Newtons (accepts N or kN and converts)
+    """
+    text = answer.strip().lower()
+    # extract numeric part
+    m = re.search(r"(-?\d+(\.\d+)?)", text)
+    if not m:
+        raise ValueError("no numeric value found")
+    value = float(m.group(1))
+
+    # extract unit substring (letters)
+    u = re.findall(r"[a-zA-Z]+", text)
+    unit_str = "".join(u).lower() if u else ""
+
+    if expected_unit == "m":
+        # require 'm' in the unit string
+        if "m" not in unit_str:
+            raise ValueError("unit must be meters (m)")
+        return value
+
+    if expected_unit == "N":
+        # accept N or kN
+        if "kn" in unit_str:
+            return value * 1000.0
+        if "n" in unit_str:
+            return value
+        raise ValueError("unit must be N or kN")
+
+    # fallback (should not normally reach)
+    return value
+
+
+def interactive_extract_params():
+    """
+    Interactive parameter collector:
+    - First, user provides a full beam description in one line.
+    - LLM extracts ONLY the parameters explicitly mentioned.
+    - Missing parameters are then asked one-by-one.
+    - Material is checked; if unknown → user chooses manual or web-search.
+    - Units are validated.
+    """
+
+    required = ["length_m", "n_elems", "HY", "HZ", "FY", "material"]
+    known = {}
+
+    from langchain_core.messages import HumanMessage
+    from langchain_openai import ChatOpenAI
+
+    # LLM instance with web-search enabled
+    llm = ChatOpenAI(
+        model="gpt-4.1",
+        api_key=openai_key,
+        temperature=0,
+        max_tokens=800,
+        extra_headers={"x-openai-web-search": "true"},
+    )
+
+    # -------------------------------
+    # 1) Ask for initial full sentence
+    # -------------------------------
+    print("🤖 Please describe your beam and loading in one sentence.")
+    print(
+        "   Example: '6m steel beam, 20 elements, height 0.2m, width 0.1m, load 1500 N'\n"
+    )
+
+    first_input = input("👤 You: ").strip()
+
+    # -------------------------------------------
+    # 2) Extract known values directly from LLM
+    # -------------------------------------------
+    extract_prompt = f"""
+Extract ONLY the parameters explicitly mentioned by the user.
+
+USER INPUT:
+"{first_input}"
+
+Allowed keys:
+- length_m
+- n_elems
+- HY
+- HZ
+- FY
+- material
+
+Rules:
+- Do NOT invent any value.
+- Do NOT include keys the user did not mention.
+- Units MUST NOT be converted; keep numeric values but DO NOT guess units.
+- Output JSON only, with no explanation.
+"""
+
+    resp = llm.invoke([HumanMessage(content=extract_prompt)])
+    raw = robust_extract_json(resp.content)
+
+    if raw:
+        for k, v in raw.items():
+            known[k] = v
+
+    # -----------------------------------------------------------
+    # Helper functions for validating numeric-values + units
+    # -----------------------------------------------------------
+    def parse_float_with_unit(text, unit="m"):
+        t = text.strip().lower()
+        t = t.replace("meters", "m").replace("meter", "m")
+        if t.endswith(unit):
+            try:
+                return float(t.replace(unit, "").strip())
+            except:
+                return None
+        return None
+
+    def parse_force(text):
+        t = text.lower().strip()
+        if "kn" in t:
+            try:
+                return float(t.replace("kn", "").strip()) * 1000.0
+            except:
+                return None
+        if "n" in t:
+            try:
+                return float(t.replace("n", "").strip())
+            except:
+                return None
+        return None
+
+    # -----------------------------------------------------------
+    # 3) Now fill missing parameters by asking user interactively
+    # -----------------------------------------------------------
+    while True:
+        missing = [p for p in required if p not in known]
+
+        if not missing:
+            # ========== MATERIAL CHECK ==========
+            material = known.get("material", "").lower()
+
+            if material and material not in ["steel", "aluminum", "aluminium"]:
+                print(f"\n⚠ Material '{material}' is not in the local database.")
+
+                choice = (
+                    input(
+                        "❓ Enter material properties manually or search online? (manual/search): "
+                    )
+                    .strip()
+                    .lower()
+                )
+
+                if choice.startswith("s"):
+                    # ---------------------------
+                    # Online search query
+                    # ---------------------------
+                    query = (
+                        f"Search the web and retrieve accurate standard mechanical properties "
+                        f"for {material}. Return Young's modulus E (Pa), Poisson ratio NU, "
+                        f"and density RHO (kg/m^3)."
+                    )
+                    print("\n🌐 Searching online…")
+
+                    resp = llm.invoke([HumanMessage(content=query)])
+                    print("\n🔎 Search result summary:\n", resp.content)
+
+                    print("\nPlease extract numeric values from the above result:")
+                    known["E"] = float(input("Enter E (Pa): "))
+                    known["NU"] = float(input("Enter NU: "))
+                    known["RHO"] = float(input("Enter RHO (kg/m³): "))
+
+                else:
+                    # Manual entry
+                    known["E"] = float(input("Enter E (Pa): "))
+                    known["NU"] = float(input("Enter NU: "))
+                    known["RHO"] = float(input("Enter RHO (kg/m³): "))
+
+            print("\n🧩 Final parameters (raw):", known)
+            return known
+
+        # --------------------------
+        # Ask for next missing value
+        # --------------------------
+        next_param = missing[0]
+
+        # LENGTH
+        if next_param == "length_m":
+            print("🤖 What is the beam length in meters?")
+            ans = input("👤 You: ")
+            val = parse_float_with_unit(ans, "m")
+            if val is None:
+                print("⚠ Length must be in meters (e.g., '3.5 m')")
+                continue
+            known["length_m"] = val
+            continue
+
+        # ELEMENT COUNT
+        if next_param == "n_elems":
+            print("🤖 What is the number of elements along the beam (integer)?")
+            ans = input("👤 You: ").strip()
+            if not ans.isdigit():
+                print("⚠ Must be an integer (e.g., '25')")
+                continue
+            known["n_elems"] = int(ans)
+            continue
+
+        # HEIGHT
+        if next_param == "HY":
+            print("🤖 What is the beam cross-section height HY in meters?")
+            ans = input("👤 You: ")
+            val = parse_float_with_unit(ans, "m")
+            if val is None:
+                print("⚠ Must be in meters (e.g., '0.2 m')")
+                continue
+            known["HY"] = val
+            continue
+
+        # WIDTH
+        if next_param == "HZ":
+            print("🤖 What is the beam cross-section width HZ in meters?")
+            ans = input("👤 You: ")
+            val = parse_float_with_unit(ans, "m")
+            if val is None:
+                print("⚠ Must be in meters (e.g., '0.1 m')")
+                continue
+            known["HZ"] = val
+            continue
+
+        # FORCE
+        if next_param == "FY":
+            print("🤖 What is the vertical load FY (N or kN)?")
+            ans = input("👤 You: ")
+            val = parse_force(ans)
+            if val is None:
+                print("⚠ Must be like '1500 N' or '1.5 kN'")
+                continue
+            known["FY"] = val
+            continue
+
+        # MATERIAL
+        if next_param == "material":
+            print("🤖 What is the beam material?")
+            ans = input("👤 You: ").strip().lower()
+            known["material"] = ans
+            continue
 
 
 # ============================================================
@@ -191,6 +436,7 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> None:
         geo_name="model.geo",
     ):
         return
+
     if not safe_call(
         mesh_with_gmsh_tool,
         os.path.join(WORKSPACE, "model.med"),
@@ -198,6 +444,7 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> None:
         med_name="model.med",
     ):
         return
+
     if not safe_call(
         generate_comm_tool,
         os.path.join(WORKSPACE, "model.comm"),
@@ -211,6 +458,7 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> None:
         FY=params["FY"],
     ):
         return
+
     if not safe_call(
         generate_export_tool,
         os.path.join(WORKSPACE, "model.export"),
@@ -220,6 +468,7 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> None:
         med_name="model.med",
     ):
         return
+
     if not safe_call(
         run_code_aster_tool,
         os.path.join(WORKSPACE, "beam_job.mess"),
@@ -256,37 +505,71 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> None:
 #  Entry point
 # ============================================================
 if __name__ == "__main__":
-    import argparse
-
     parser = argparse.ArgumentParser(description="Hybrid Agent Runner")
 
     parser.add_argument(
         "--mode",
         type=str,
         default="agent",
-        choices=["agent", "tool"],
-        help="Run mode: agent (default) or tool execution",
+        choices=["agent", "tool", "chat"],
+        help="agent: one-shot NL prompt; tool: run with DEFAULT_PARAMS; chat: interactive Q&A with LLM",
     )
 
     parser.add_argument(
         "--input",
         type=str,
         required=False,
-        help="User natural language request (example: 'run full analysis')",
+        help="User natural language request (example: 'simulate a 4m beam with 25 elements and 2000 N')",
     )
 
     args = parser.parse_args()
 
-    # Route based on mode
     if args.mode == "agent":
         print(f"\n🟢 AGENT MODE STARTED")
         print(f"🔹 Input: {args.input}\n")
-
-        params = extract_params_with_openai(args.input)
+        params = extract_params_with_openai(args.input or "")
         run_hybrid_pipeline(params)
 
     elif args.mode == "tool":
-        print("\n🟡 TOOL MODE EXECUTION\n")
-
-        # ✅ Use default values when running tool mode
+        print("\n🟡 TOOL MODE EXECUTION (using DEFAULT_PARAMS)\n")
         run_hybrid_pipeline(DEFAULT_PARAMS)
+
+    elif args.mode == "chat":
+        print("\n🟢 INTERACTIVE CHAT MODE")
+        # 1) interactive collection (no defaults)
+        raw_params = interactive_extract_params()
+
+        # 2) derive E, NU, RHO from material or defaults
+        material = raw_params.get("material", "default").lower()
+
+        if material == "steel":
+            E = 210e9
+            NU = 0.3
+            RHO = 7850.0
+        elif material in ("aluminium", "aluminum"):
+            E = 69e9
+            NU = 0.33
+            RHO = 2700.0
+        else:
+            # fallback to defaults for unknown material
+            E = DEFAULT_PARAMS["E"]
+            NU = DEFAULT_PARAMS["NU"]
+            RHO = DEFAULT_PARAMS["RHO"]
+
+        # 3) build full params dict for pipeline
+        full_params: Dict[str, Any] = dict(DEFAULT_PARAMS)
+        full_params.update(
+            {
+                "length_m": float(raw_params["length_m"]),
+                "n_elems": int(raw_params["n_elems"]),
+                "HY": float(raw_params["HY"]),
+                "HZ": float(raw_params["HZ"]),
+                "FY": float(raw_params["FY"]),
+                "E": E,
+                "NU": NU,
+                "RHO": RHO,
+            }
+        )
+
+        print("📦 Final parameters going into pipeline:", full_params)
+        run_hybrid_pipeline(full_params)

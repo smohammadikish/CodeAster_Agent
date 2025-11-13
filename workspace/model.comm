@@ -41,7 +41,7 @@ cara = AFFE_CARA_ELEM(
     GROUP_MA=('BEAM',),
     SECTION='RECTANGLE',
     CARA=('HY','HZ'),
-    VALE=(0.2, 0.1)
+    VALE=(0.35, 0.25)
   )
 );
 
@@ -60,7 +60,7 @@ load = AFFE_CHAR_MECA(
   MODELE=model,
   FORCE_NODALE=_F(
     GROUP_NO=('TIP',),
-    FY=-1500.0
+    FY=1300.0
   )
 );
 
