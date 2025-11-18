@@ -8,9 +8,12 @@ import sys
 # Ensure project root is in path
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from tools.visualize_tool import (visualize_freebody_tool,
-                                  visualize_mfz_contour_tool,
-                                  visualize_resu_tool, visualize_stress_tool)
+from tools.visualize_tool import (
+    visualize_freebody_tool,
+    visualize_mfz_contour_tool,
+    visualize_resu_tool,
+    visualize_stress_tool,
+)
 
 # ============================================================
 # 🧪 TOOL 1 — DEFLECTION & ROTATION
