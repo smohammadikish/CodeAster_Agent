@@ -2,6 +2,7 @@
 #  tools/visualize_tool.py
 # ----------------------------
 
+
 import os
 import re
 
@@ -520,6 +521,11 @@ def _draw_load(ax, beam_length, loads):
 # ------------------------------------------------------------
 #  5. Main visualization tool
 # ------------------------------------------------------------
+# ============================================================
+# 🟧 TOOL 4 — FREE-BODY DIAGRAM (FIXED FOR mm → m SCALING)
+# ============================================================
+
+
 @tool("visualize_freebody", return_direct=False)
 def visualize_freebody_tool(
     reac_name: str = "tab_reac.txt",
@@ -530,49 +536,60 @@ def visualize_freebody_tool(
 ) -> str:
     """Draw full free-body diagram including supports, loads, and reactions."""
 
-    # --- Read beam length ---
+    # --- Read beam length in mm from .geo ---
     geo_path = os.path.join(WORKSPACE, geo_name)
-    beam_length = _read_beam_length(geo_path)
-    if beam_length is None:
-        beam_length = 1.0
+    beam_length_mm = _read_beam_length(geo_path)
+    if beam_length_mm is None:
+        beam_length_mm = 1000.0  # fallback = 1 meter
 
-    # --- Read reactions and loads ---
+    # Convert mm → m for plotting
+    beam_length = beam_length_mm / 1000.0
+
+    # --- Read reactions ---
     reac_path = os.path.join(WORKSPACE, reac_name)
     reac = _read_reactions(reac_path)
     if reac is None:
         return f"❌ Error: could not parse reactions from '{reac_path}'."
 
+    # --- Read loads ---
     comm_path = os.path.join(WORKSPACE, comm_name)
     loads = _read_loads(comm_path)
 
-    # --- Plot setup ---
+    # --- Figure setup ---
     plt.style.use("seaborn-v0_8-whitegrid")
     fig, ax = plt.subplots(figsize=(7, 2.3))
     ax.set_facecolor("white")
 
-    # Beam axis
+    # Draw beam axis (in meters)
     ax.plot([0, beam_length], [0, 0], color="black", lw=3, solid_capstyle="round")
 
-    # Draw support
+    # Draw support at x=0
     _draw_support(ax, x0=0.0, y0=0.0, support_type=support_type)
 
-    # Reaction Force
+    # Draw reaction Fy
     Fy = reac["Fy"]
     if abs(Fy) > 1e-9:
         _draw_vertical_arrow(
-            ax, x=-0.05, y=0.0, magnitude=Fy, label=f"Fy={Fy/1000:.1f} kN"
+            ax,
+            x=-0.05,
+            y=0.0,
+            magnitude=Fy,
+            label=f"Fy={Fy/1000:.1f} kN",
         )
 
-    # Reaction Moment (for fixed support)
+    # Draw reaction moment Mz (fixed support only)
     if support_type == "fixed":
         Mz = reac["Mz"]
         if abs(Mz) > 1e-9:
             theta = np.linspace(np.deg2rad(85), np.deg2rad(275), 100)
             r = 0.18
             cx, cy = -0.10, 0.0
+
             arc_x = cx + r * np.cos(theta)
             arc_y = cy + r * np.sin(theta)
             ax.plot(arc_x, arc_y, color="tab:blue", lw=2.4)
+
+            # Arrowhead for moment
             ax.arrow(
                 arc_x[1],
                 arc_y[1],
@@ -585,13 +602,12 @@ def visualize_freebody_tool(
                 lw=0,
                 length_includes_head=True,
             )
-            text_x = cx - r - 0.12
-            text_y = cy + 0.02
-            M_value = Mz / 1000
+
+            M_value = Mz / 1000.0  # convert N·mm → kN·mm
             ax.text(
-                text_x,
-                text_y,
-                f"M = {M_value:.1f} kN·mm",
+                cx - r - 0.12,
+                cy + 0.02,
+                f"M = {M_value:.1f} N·mm",
                 color="tab:blue",
                 fontsize=10,
                 va="center",
@@ -599,29 +615,34 @@ def visualize_freebody_tool(
                 fontweight="bold",
             )
 
-    # Draw applied loads (in red)
+    # Draw loads (in meters)
     if loads:
         _draw_load(ax, beam_length, loads)
 
-    # Dimension line
+    # Dimension line under the beam
     arrow_y = -0.25
     ax.annotate(
         "",
         xy=(0, arrow_y),
         xytext=(beam_length, arrow_y),
-        arrowprops=dict(arrowstyle="<->", lw=1.5, color="gray"),
+        arrowprops=dict(
+            arrowstyle="<->",
+            lw=1.5,
+            color="gray",
+        ),
     )
+
     ax.text(
         beam_length / 2,
         arrow_y - 0.05,
-        f"L = {beam_length:.2f} {unit}",
-        ha="center",
-        va="top",
+        f"L = {beam_length:.2f} m",
         fontsize=10,
         color="gray",
+        ha="center",
+        va="top",
     )
 
-    # Final layout
+    # Final plot settings
     ax.set_xlim(-0.35, beam_length + 0.25)
     ax.set_ylim(-0.45, 0.55)
     ax.set_aspect("equal", adjustable="box")
@@ -632,12 +653,13 @@ def visualize_freebody_tool(
     plt.savefig(out_path, dpi=250, bbox_inches="tight")
     plt.close()
 
-    # --- Return summary info ---
+    # Return summary
     return (
         f"✅ Free-body diagram generated.\n"
         f"🖼 Image: {out_path}\n"
-        f"📏 Beam length: {beam_length:.2f} {unit}\n"
+        f"📏 Beam length: {beam_length:.2f} m\n"
         f"📍 Support: {support_type}\n"
-        f"🔁 Reactions at {reac['node']}: Fx={reac['Fx']:.2f} N, Fy={reac['Fy']:.2f} N, Mz={reac['Mz']:.2f} Nmm\n"
+        f"🔁 Reactions at {reac['node']}: "
+        f"Fx={reac['Fx']:.2f} N, Fy={reac['Fy']:.2f} N, Mz={reac['Mz']:.2f} Nmm\n"
         f"🎯 Loads: {len(loads)} found from {comm_name}"
     )

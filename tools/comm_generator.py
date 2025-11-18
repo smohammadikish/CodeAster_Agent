@@ -1,15 +1,19 @@
 # ----------------------------
-#  tools/comm_generator.py
+#  tools/comm_generator.py  (UPDATED to match mm pipeline)
 # ----------------------------
 
 import os
 
-from langchain_core.tools import tool  # ✅ Updated import for LangChain 1.x
+from langchain_core.tools import tool
 
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
 
-# Template for Code_Aster .comm file generation
+
+# ============================================================
+#  Code_Aster .comm template (values are in millimeters)
+# ============================================================
+
 COMM_TEMPLATE = r"""
 # __________________________ Start __________________________
 DEBUT(PAR_LOT='NON');
@@ -46,14 +50,14 @@ mater = AFFE_MATERIAU(
   AFFE=_F(GROUP_MA=('BEAM',), MATER=mat)
 );
 
-# __________ Define beam section geometry (rectangular) ________
+# __________ Define beam section geometry (rectangular, mm) ________
 cara = AFFE_CARA_ELEM(
   MODELE=model,
   POUTRE=_F(
     GROUP_MA=('BEAM',),
     SECTION='RECTANGLE',
     CARA=('HY','HZ'),
-    VALE=({HY}, {HZ})
+    VALE=({HY_mm}, {HZ_mm})
   )
 );
 
@@ -72,7 +76,7 @@ load = AFFE_CHAR_MECA(
   MODELE=model,
   FORCE_NODALE=_F(
     GROUP_NO=('TIP',),
-    FY={FY}
+    FY={FY_N}
   )
 );
 
@@ -94,7 +98,7 @@ res_stat = MECA_STATIQUE(
   )
 );
 
-# __________ Compute displacements, reactions, stresses ________
+# __________ Compute fields: reactions, displacements, stresses ________
 res_stat = CALC_CHAMP(
   reuse=res_stat,
   RESULTAT=res_stat,
@@ -124,44 +128,24 @@ tab_disp = CREA_TABLE(
 );
 
 # __________________ Print tables to text ______________________
-IMPR_TABLE(
-  TABLE=tab_reac,
-  UNITE=18,
-  SEPARATEUR=' ',
-  FORMAT='TABLEAU',
-  FORMAT_R='E12.5'
-);
-
-IMPR_TABLE(
-  TABLE=tab_disp,
-  UNITE=19,
-  SEPARATEUR=' ',
-  FORMAT='TABLEAU',
-  FORMAT_R='E12.5'
-);
+IMPR_TABLE(TABLE=tab_reac, UNITE=18, SEPARATEUR=' ', FORMAT='TABLEAU', FORMAT_R='E12.5');
+IMPR_TABLE(TABLE=tab_disp, UNITE=19, SEPARATEUR=' ', FORMAT='TABLEAU', FORMAT_R='E12.5');
 
 # __________________ Print displacement field __________________
 IMPR_RESU(
   FORMAT='RESULTAT',
   UNITE=80,
-  RESU=_F(
-    RESULTAT=res_stat,
-    NOM_CHAM='DEPL'
-  )
+  RESU=_F(RESULTAT=res_stat, NOM_CHAM='DEPL')
 );
 
 # __________________ Print local coordinate systems ____________
 IMPR_CONCEPT(
-  CONCEPT=_F(
-    CARA_ELEM=cara,
-    MODELE=model,
-    REPERE_LOCAL='ELEM'
-  ),
+  CONCEPT=_F(CARA_ELEM=cara, MODELE=model, REPERE_LOCAL='ELEM'),
   FORMAT='RESULTAT',
   UNITE=53
 );
 
-# __________________ Internal beam forces (axial/shear/bending) __________
+# __________________ Internal forces table ______________________
 SIEFTAB = POST_RELEVE_T(
   ACTION=_F(
     INTITULE='BeamForces',
@@ -174,39 +158,54 @@ SIEFTAB = POST_RELEVE_T(
   )
 );
 
-IMPR_TABLE(
-  TABLE=SIEFTAB,
-  UNITE=21,
-  SEPARATEUR=';',
-  FORMAT='TABLEAU',
-  FORMAT_R='E12.5'
-);
+IMPR_TABLE(TABLE=SIEFTAB, UNITE=21, SEPARATEUR=';', FORMAT='TABLEAU', FORMAT_R='E12.5');
 
 # __________________________ End __________________________
 FIN();
 """
 
 
+# ============================================================
+#  Tool definition (arguments in **mm**)
+# ============================================================
+
+
 @tool("generate_comm", return_direct=False)
 def generate_comm_tool(
     med_name: str = "model.med",
     comm_name: str = "model.comm",
-    E: float = 11e9,
+    E: float = 210e9,
     NU: float = 0.3,
-    RHO: float = 480.0,
-    HY: float = 0.12,
-    HZ: float = 0.10,
-    FY: float = -1500.0,
+    RHO: float = 7850.0,
+    HY_mm: float = 120.0,
+    HZ_mm: float = 100.0,
+    FY_N: float = -1500.0,
 ) -> str:
-    """Generate Code_Aster .comm file"""
+    """
+    Generate a Code_Aster .comm file.
+
+    IMPORTANT:
+    - HY_mm, HZ_mm must be in millimeters (mm)
+    - FY_N is the load in Newtons
+    """
+
     med_path = os.path.join(WORKSPACE, med_name)
     comm_path = os.path.join(WORKSPACE, comm_name)
 
     if not os.path.exists(med_path):
         return f"❌ Error: mesh file '{med_path}' not found."
 
-    content = COMM_TEMPLATE.format(E=E, NU=NU, RHO=RHO, HY=HY, HZ=HZ, FY=FY)
+    # Fill template
+    content = COMM_TEMPLATE.format(
+        E=E,
+        NU=NU,
+        RHO=RHO,
+        HY_mm=HY_mm,
+        HZ_mm=HZ_mm,
+        FY_N=FY_N,
+    )
 
+    # Write file
     with open(comm_path, "w", encoding="utf-8") as f:
         f.write(content)
 

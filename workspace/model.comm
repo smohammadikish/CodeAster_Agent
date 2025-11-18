@@ -34,14 +34,14 @@ mater = AFFE_MATERIAU(
   AFFE=_F(GROUP_MA=('BEAM',), MATER=mat)
 );
 
-# __________ Define beam section geometry (rectangular) ________
+# __________ Define beam section geometry (rectangular, mm) ________
 cara = AFFE_CARA_ELEM(
   MODELE=model,
   POUTRE=_F(
     GROUP_MA=('BEAM',),
     SECTION='RECTANGLE',
     CARA=('HY','HZ'),
-    VALE=(0.35, 0.25)
+    VALE=(210.0, 130.0)
   )
 );
 
@@ -60,7 +60,7 @@ load = AFFE_CHAR_MECA(
   MODELE=model,
   FORCE_NODALE=_F(
     GROUP_NO=('TIP',),
-    FY=1300.0
+    FY=-1500.0
   )
 );
 
@@ -82,7 +82,7 @@ res_stat = MECA_STATIQUE(
   )
 );
 
-# __________ Compute displacements, reactions, stresses ________
+# __________ Compute fields: reactions, displacements, stresses ________
 res_stat = CALC_CHAMP(
   reuse=res_stat,
   RESULTAT=res_stat,
@@ -112,44 +112,24 @@ tab_disp = CREA_TABLE(
 );
 
 # __________________ Print tables to text ______________________
-IMPR_TABLE(
-  TABLE=tab_reac,
-  UNITE=18,
-  SEPARATEUR=' ',
-  FORMAT='TABLEAU',
-  FORMAT_R='E12.5'
-);
-
-IMPR_TABLE(
-  TABLE=tab_disp,
-  UNITE=19,
-  SEPARATEUR=' ',
-  FORMAT='TABLEAU',
-  FORMAT_R='E12.5'
-);
+IMPR_TABLE(TABLE=tab_reac, UNITE=18, SEPARATEUR=' ', FORMAT='TABLEAU', FORMAT_R='E12.5');
+IMPR_TABLE(TABLE=tab_disp, UNITE=19, SEPARATEUR=' ', FORMAT='TABLEAU', FORMAT_R='E12.5');
 
 # __________________ Print displacement field __________________
 IMPR_RESU(
   FORMAT='RESULTAT',
   UNITE=80,
-  RESU=_F(
-    RESULTAT=res_stat,
-    NOM_CHAM='DEPL'
-  )
+  RESU=_F(RESULTAT=res_stat, NOM_CHAM='DEPL')
 );
 
 # __________________ Print local coordinate systems ____________
 IMPR_CONCEPT(
-  CONCEPT=_F(
-    CARA_ELEM=cara,
-    MODELE=model,
-    REPERE_LOCAL='ELEM'
-  ),
+  CONCEPT=_F(CARA_ELEM=cara, MODELE=model, REPERE_LOCAL='ELEM'),
   FORMAT='RESULTAT',
   UNITE=53
 );
 
-# __________________ Internal beam forces (axial/shear/bending) __________
+# __________________ Internal forces table ______________________
 SIEFTAB = POST_RELEVE_T(
   ACTION=_F(
     INTITULE='BeamForces',
@@ -162,13 +142,7 @@ SIEFTAB = POST_RELEVE_T(
   )
 );
 
-IMPR_TABLE(
-  TABLE=SIEFTAB,
-  UNITE=21,
-  SEPARATEUR=';',
-  FORMAT='TABLEAU',
-  FORMAT_R='E12.5'
-);
+IMPR_TABLE(TABLE=SIEFTAB, UNITE=21, SEPARATEUR=';', FORMAT='TABLEAU', FORMAT_R='E12.5');
 
 # __________________________ End __________________________
 FIN();
