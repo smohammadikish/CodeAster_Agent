@@ -2,6 +2,17 @@
 #  tools/mesher_gmsh.py (fixed order)
 # ----------------------------
 
+"""
+1) mesh_with_gmsh_tool is no longer “executable” in docker architecture!
+
+This tool just:
+* Checks for the existence of model.geo
+* Tells the Agent: ✔ “The geometry is present and everything is ready for meshing.
+
+Agent only does the logical work
+The actual execution of Gmsh and Code_Aster is done inside the solver-container
+"""
+
 import os
 import shutil
 import subprocess

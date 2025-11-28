@@ -20,6 +20,7 @@ from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import tool
+
 # LangChain imports
 from langchain_openai import ChatOpenAI
 from tools.comm_generator import generate_comm_tool
@@ -28,9 +29,12 @@ from tools.geo_generator import generate_geo_tool
 from tools.mesher_gmsh import mesh_with_gmsh_tool
 from tools.run_aster_tool import run_code_aster_tool
 from tools.validators import file_exists
-from tools.visualize_tool import (visualize_freebody_tool,
-                                  visualize_mfz_contour_tool,
-                                  visualize_resu_tool, visualize_stress_tool)
+from tools.visualize_tool import (
+    visualize_freebody_tool,
+    visualize_mfz_contour_tool,
+    visualize_resu_tool,
+    visualize_stress_tool,
+)
 
 # ============================================================
 #  Setup
