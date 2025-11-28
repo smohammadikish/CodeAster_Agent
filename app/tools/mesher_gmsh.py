@@ -6,9 +6,8 @@ import os
 import shutil
 import subprocess
 
-from langchain_core.tools import tool  # ✅ Compatible with LangChain 1.x
-
 from env_loader import load_env  # Reads GMSH_BIN path from .env
+from langchain_core.tools import tool  # ✅ Compatible with LangChain 1.x
 
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
@@ -52,7 +51,44 @@ def mesh_with_gmsh_tool(
         "1",  # clean orphan nodes
         "-v",
         "2",  # verbosity level
-    ]
+    ]  # tools/mesher_gmsh.py
+
+
+import os
+
+from langchain_core.tools import tool
+
+WORKSPACE = "workspace"
+os.makedirs(WORKSPACE, exist_ok=True)
+
+
+@tool("mesh_with_gmsh", return_direct=False)
+def mesh_with_gmsh_tool(
+    geo_name: str = "model.geo",
+    med_name: str = "model.med",
+) -> str:
+    """
+    (Logical step) Validate that the .geo file exists.
+
+    In the Dockerized architecture, the actual meshing with Gmsh is done
+    inside the `solver-image` container (together with Code_Aster).
+    This tool now only checks that the geometry file exists in the workspace.
+    """
+
+    geo_path = os.path.join(WORKSPACE, geo_name)
+
+    if not os.path.exists(geo_path):
+        return f"❌ Error: input file '{geo_path}' not found."
+
+    med_path = os.path.join(WORKSPACE, med_name)
+
+    return (
+        "✅ Geometry file is ready for meshing.\n"
+        f"Geo path: {os.path.abspath(geo_path)}\n"
+        f"Expected MED path (after solver run): {os.path.abspath(med_path)}\n\n"
+        "ℹ️ Note: In the Docker setup, Gmsh runs inside the `solver-image` "
+        "container, not inside this app container."
+    )
 
     # --- Full Gmsh command ---
     cmd = [gmsh_path, geo_path, "-1", "-format", "med", "-o", med_path] + gmsh_opts

@@ -1,0 +1,33 @@
+services:
+  app:
+    build:
+      context: ./app
+    image: app-image
+    container_name: app-agent
+    working_dir: /app
+    command: ["python", "main_agent.py"]
+    volumes:
+      # Share workspace between host and app container
+      - ./workspace:/app/workspace
+      # Give app access to host Docker daemon
+      # Docker Outside of Docker (DooD)
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - .env
+    environment:
+      # Name of the solver image that app will call via `docker run`
+      SOLVER_IMAGE: solver-image
+      # Host path to workspace (used by docker CLI inside app)
+      HOST_WORKSPACE: ${HOST_WORKSPACE}
+
+  solver:
+    build:
+      context: ./solver
+    image: solver-image
+    container_name: codeaster-solver
+    volumes:
+      # Same host workspace, but mounted at /workspace as expected by run_solver.py
+      - ./workspace:/workspace
+    # This container does not need to run all the time.
+    # The app will use `docker run solver-image ...` per job.
+    command: ["bash", "-c", "echo 'solver-image built and ready'; sleep infinity"]

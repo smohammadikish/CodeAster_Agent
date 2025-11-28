@@ -15,14 +15,13 @@ from dotenv import load_dotenv
 # Load environment
 # ----------------------------
 load_dotenv()
+from env_loader import load_env
 from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import tool
 # LangChain imports
 from langchain_openai import ChatOpenAI
-
-from env_loader import load_env  
 from tools.comm_generator import generate_comm_tool
 from tools.export_generator import generate_export_tool
 from tools.geo_generator import generate_geo_tool

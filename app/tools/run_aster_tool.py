@@ -1,89 +1,116 @@
-# ----------------------------
-#  tools/run_aster_tool.py (final fixed)
-# ----------------------------
+# tools/run_aster_tool.py
 
 import os
-import platform
-import shutil  # ✅ added for which()
 import subprocess
 
 from langchain_core.tools import tool
 
-from env_loader import load_env
-
 WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
 
+# Name of the solver image (can also be read from .env if you prefer)
+SOLVER_IMAGE = os.getenv("SOLVER_IMAGE", "solver-image")
+
+# Host path to the shared workspace directory.
+# This is needed because `docker run -v <host_path>:/workspace ...`
+HOST_WORKSPACE = os.getenv("HOST_WORKSPACE")  # e.g. /Users/you/project/workspace
+
 
 @tool("run_code_aster", return_direct=True)
-def run_code_aster_tool(export_name: str = "model.export") -> str:
+def run_code_aster_tool(
+    geo_name: str = "model.geo",
+    export_name: str = "model.export",
+) -> str:
     """
-    Run the Code_Aster solver using the generated export file.
-    Works on Windows (.bat) and Linux (as_run).
-    Produces .mess and .resu inside workspace folder.
+    Run Gmsh + Code_Aster inside the `solver-image` Docker container.
+
+    This tool assumes:
+      - `workspace/` is a shared folder between the app container and host.
+      - The host path to `workspace/` is provided via the HOST_WORKSPACE env var.
+      - The solver Docker image name is given by SOLVER_IMAGE (default: solver-image).
     """
 
-    # --- Load environment ---
-    _, as_run_bin, *_ = load_env()
-    export_path = os.path.abspath(os.path.join(WORKSPACE, export_name))
+    # Paths inside the app container
+    geo_path = os.path.join(WORKSPACE, geo_name)
+    export_path = os.path.join(WORKSPACE, export_name)
+
+    if not os.path.exists(geo_path):
+        return f"❌ Error: geometry file not found:\n{os.path.abspath(geo_path)}"
 
     if not os.path.exists(export_path):
-        return f"❌ Error: Export file not found:\n{export_path}"
+        return f"❌ Error: export file not found:\n{os.path.abspath(export_path)}"
 
-    # --- Platform command ---
-    system = platform.system().lower()
-    if system.startswith("win"):
-        as_run_bin = as_run_bin or "as_run.bat"
-        if not as_run_bin.lower().endswith(".bat"):
-            as_run_bin += ".bat"
-        cmd = [as_run_bin, export_path]
-    else:
-        cmd = [as_run_bin or "as_run", export_path]
-
-    # --- Verify binary existence ---
-    if shutil.which(cmd[0]) is None:
+    if not HOST_WORKSPACE:
         return (
-            f"❌ Code_Aster binary not found: {cmd[0]}\n"
-            "Please check AS_RUN_BIN in your .env file.\n"
-            "Example:\n"
-            "  AS_RUN_BIN=C:\\Program Files\\Code_Aster\\bin\\as_run.bat\n"
-            "  or /usr/bin/as_run"
+            "❌ Error: HOST_WORKSPACE environment variable is not set.\n"
+            "It must point to the *host* path of the shared `workspace` directory.\n"
+            "Example (host):\n"
+            '  export HOST_WORKSPACE="/Users/you/training/workspace"'
         )
 
+    # Build the docker command that will run in the host Docker daemon
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{HOST_WORKSPACE}:/workspace",
+        SOLVER_IMAGE,
+        geo_name,
+        export_name,
+    ]
+
     try:
-        print(f"🔧 Running Code_Aster: {' '.join(cmd)}")
+        print(f"🔧 Running solver container: {' '.join(cmd)}")
 
         result = subprocess.run(
             cmd,
-            cwd=WORKSPACE,
             capture_output=True,
             text=True,
-            shell=system.startswith("win"),
         )
 
         if result.returncode != 0:
             return (
-                f"⚠️ Code_Aster run failed (exit {result.returncode}).\n"
-                f"stderr:\n{result.stderr}\nstdout:\n{result.stdout}"
+                "⚠️ Solver (Gmsh + Code_Aster) failed.\n"
+                f"Command: {' '.join(cmd)}\n\n"
+                f"STDOUT:\n{result.stdout}\n\n"
+                f"STDERR:\n{result.stderr}"
             )
 
-        # --- Output files ---
+        # At this point, the solver container should have created MED + Aster outputs
         job_name = os.path.splitext(os.path.basename(export_name))[0]
         mess = os.path.join(WORKSPACE, f"{job_name}.mess")
         resu = os.path.join(WORKSPACE, f"{job_name}.resu")
+        med = os.path.join(WORKSPACE, "model.med")
 
         msg = [
-            "✅ Code_Aster run completed successfully.",
-            f"Export: {export_path}",
-            f"MESS: {mess if os.path.exists(mess) else '(missing)'}",
-            f"RESU: {resu if os.path.exists(resu) else '(missing)'}",
-            "\n--- First lines of output ---\n",
+            "✅ Solver container completed successfully (Gmsh + Code_Aster).",
+            f"Geo:  {os.path.abspath(geo_path)}",
+            (
+                f"MED:  {os.path.abspath(med)}"
+                if os.path.exists(med)
+                else "MED: (not found)"
+            ),
+            (
+                f"MESS: {os.path.abspath(mess)}"
+                if os.path.exists(mess)
+                else "MESS: (not found)"
+            ),
+            (
+                f"RESU: {os.path.abspath(resu)}"
+                if os.path.exists(resu)
+                else "RESU: (not found)"
+            ),
+            "\n--- Solver STDOUT (first 500 chars) ---\n",
             result.stdout[:500] + ("..." if len(result.stdout) > 500 else ""),
         ]
         return "\n".join(msg)
 
     except FileNotFoundError:
-        return f"❌ as_run not found: {cmd[0]} — check AS_RUN_BIN in .env"
+        return (
+            "❌ Error: `docker` CLI not found inside app container.\n"
+            "You need to install docker-cli in the app image and mount the Docker socket.\n"
+        )
 
     except Exception as e:
-        return f"❌ Unexpected error running Code_Aster: {e}"
+        return f"❌ Unexpected error while running solver container: {e}"

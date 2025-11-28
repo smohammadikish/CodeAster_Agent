@@ -2,7 +2,6 @@ import os
 import subprocess
 import sys
 
-
 # Hard-coded paths used inside the container
 WORKSPACE_DIR = "/workspace"
 ASTER_BIN = "/opt/spack/var/spack/environments/simvia_env/.spack-env/view/bin/run_aster"
@@ -35,6 +34,7 @@ def run_gmsh(geo_file: str, med_file: str) -> None:
     print("Running Gmsh:", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
+
 def run_aster(export_file: str) -> None:
     """Run Code_Aster using the export file."""
     cmd = [ASTER_BIN, export_file]
@@ -42,14 +42,13 @@ def run_aster(export_file: str) -> None:
     subprocess.run(cmd, check=True)
 
 
-
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Usage: run_solver.py <geo_name> <export_name>")
         sys.exit(1)
 
-    geo = sys.argv[1]      # e.g. "model.geo"
-    export = sys.argv[2]   # e.g. "model.export"
+    geo = sys.argv[1]  # e.g. "model.geo"
+    export = sys.argv[2]  # e.g. "model.export"
 
     geo_path = os.path.join(WORKSPACE_DIR, geo)
     med_path = os.path.join(WORKSPACE_DIR, geo.replace(".geo", ".med"))

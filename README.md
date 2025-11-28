@@ -2,45 +2,63 @@
 
 # 🚀 Docker Architecture for Code_Aster + Gmsh Agent
 
-This document explains the new **two-container system** used to run **Gmsh meshing** and **Code_Aster simulation** from inside the chat-based application.
+This document describes the **two-container architecture** used for running **Gmsh meshing** and **Code_Aster simulation** from inside the LangChain-based agent.
 
 ---
 
-## 📦 Overview
+# 🏗 Architecture Overview
 
-The application now uses **two separate Docker images**:
-
-### **1) `app-image` – Main Agent**
-
-* Runs the LangChain-based agent.
-* Generates:
-
-  * `model.geo`
-  * `model.comm`
-  * `model.export`
-* Stores files inside `workspace/`.
-* **Does not run Gmsh or Code_Aster.**
-* Instead, it calls the solver container through Docker.
-
-### **2) `solver-image` – Meshing + Simulation**
-
-* Contains:
-
-  * Gmsh CLI with full MED support
-  * Code_Aster 17.2 solver
-* Takes `model.geo` & `model.export` as input.
-* Produces:
-
-  * `model.med`
-  * `model.mess`
-  * `model.resu`
-* Results are saved back into `workspace/`.
+The system consists of **two Docker images** working together:
 
 ---
 
-## 📁 Shared Workspace Folder
+## **1) `app-image` – Main Application (LangChain Agent)**
 
-Both containers share a common directory:
+Responsible for:
+
+* Running the Chat/LLM agent
+* Generating input files:
+
+  ```
+  model.geo
+  model.comm
+  model.export
+  ```
+* Managing the workspace
+* Calling the solver container via Docker
+
+Does **not** run Gmsh or Code_Aster internally.
+
+---
+
+## **2) `solver-image` – Mesher + FEA Solver**
+
+Contains:
+
+* **Gmsh CLI** (compiled with MED support)
+* **Code_Aster 17.2 solver**
+
+Responsible for:
+
+* Reading `model.geo`
+* Generating `model.med`
+* Running Code_Aster using `model.export`
+* Producing:
+
+  ```
+  model.med
+  model.mess
+  model.resu
+  model.rmed (if applicable)
+  ```
+
+All results are saved into the shared `workspace/` folder.
+
+---
+
+# 📁 Shared Workspace Design
+
+Both containers use **the same folder**:
 
 ```
 workspace/
@@ -48,121 +66,131 @@ workspace/
 
 Mapping:
 
-| Host Path    | app-image        | solver-image |
+| Host         | app-image        | solver-image |
 | ------------ | ---------------- | ------------ |
 | `workspace/` | `/app/workspace` | `/workspace` |
 
-The app generates input files.
-The solver container writes output files.
+### Workflow:
+
+1. app generates: `.geo`, `.comm`, `.export`
+2. solver reads them, runs Gmsh + Code_Aster
+3. solver writes back `.med`, `.mess`, `.resu`
+4. app parses the results
 
 ---
 
-## 🔧 Updated Tools Inside the App
+# 🔧 Updated Tools in the App
 
-### 🟦 `mesh_with_gmsh_tool`
-
-This tool **no longer executes Gmsh internally**.
-
-It now:
-
-* Validates that `model.geo` exists
-* Returns confirmation that meshing can proceed
-* Actual meshing is performed **inside solver-image**
+The agent tools no longer execute binaries locally.
+They **prepare files and trigger the solver**.
 
 ---
 
-### 🟩 `run_code_aster_tool`
+## 🟦 `mesh_with_gmsh_tool`
 
-This tool now:
+✔ Validates that `model.geo` exists
+✔ No longer runs Gmsh
+✔ Allows agent to proceed to solver call
 
-1. Validates `model.export`
-2. Prepares a Docker command:
-
-   ```bash
-   docker run --rm \
-     -v HOST_WORKSPACE:/workspace \
-     solver-image \
-     model.geo model.export
-   ```
-3. Runs both:
-
-   * Gmsh meshing
-   * Code_Aster simulation
-4. Returns results to the agent, including:
-
-   * Paths to `.med`, `.mess`, `.resu`
-   * Partial stdout logs
-
-This design fully separates *agent logic* from *solver execution*.
+Meshing now always happens inside `solver-image`.
 
 ---
 
-## 🌍 Required Environment Variables in app-image
+## 🟩 `run_code_aster_tool`
 
-The app container needs:
+Runs everything through Docker:
 
-### `SOLVER_IMAGE`
+1. Ensures `model.export` exists
+2. Builds a Docker command:
 
-Name of the solver container:
+```bash
+docker run --rm \
+  -v HOST_WORKSPACE:/workspace \
+  ${SOLVER_IMAGE} \
+  model.geo model.export
+```
+
+3. Executes:
+
+* Gmsh (meshing)
+* Code_Aster (simulation)
+
+4. Returns:
+
+* paths of `.med`, `.mess`, `.resu`
+* partial stdout logs
+* any error messages
+
+This isolates heavy solvers from the lightweight application image.
+
+---
+
+# 🌍 Required Environment Variables
+
+A **single `.env` file** lives in the project root (next to docker-compose.yml).
+
+### Example `.env`:
 
 ```env
+# Solver image name
 SOLVER_IMAGE=solver-image
+
+# Absolute path to workspace on host
+HOST_WORKSPACE=/Users/yourname/training/workspace
+
+# Agent keys
+OPENAI_API_KEY=xxxx
+GROQ_API_KEY=xxxx
+ANTHROPIC_API_KEY=xxxx
+
+# Fallback paths (not used inside app now)
+GMSH_BIN=gmsh
+AS_RUN_BIN=/opt/spack/var/spack/environments/simvia_env/.spack-env/view/bin/run_aster
 ```
-
-### `HOST_WORKSPACE`
-
-Absolute host path to the workspace folder:
-
-```env
-HOST_WORKSPACE=/Users/yourname/project/workspace
-```
-
-The app uses these values to construct the solver command.
 
 ---
 
-## 🐳 Docker Requirements
+# 🐳 Docker Requirements for app-image
 
-Because app-image launches other containers, it must:
+Because app-image needs to launch another container (solver-image), it must support **Docker-outside-of-Docker (DooD)**:
 
-### 1. Include Docker CLI
+### 1) Docker CLI must be installed inside the image
 
-Installed via apt in the Dockerfile.
+Added in the app-image Dockerfile.
 
-### 2. Mount host Docker socket
-
-When running app-image, you must mount:
+### 2) App container must mount the host’s Docker socket:
 
 ```
 -v /var/run/docker.sock:/var/run/docker.sock
 ```
 
-This allows the container to run other containers — a method known as **Docker-outside-of-Docker (DooD)**.
+This allows:
+
+* `docker run`
+* `docker ps`
+* `docker logs`
+* etc.
+
+from inside the app.
 
 ---
 
-## 🧠 Why Two Containers?
+# 🐙 docker-compose.yml
 
-### ❌ Old Single-Container Approach
+The `docker-compose.yml`:
 
-* Very large image
-* Installation conflicts (gmsh, aster, python deps)
-* No ARM/M1 compatibility
-* Hard to maintain & debug
+* Builds both images
+* Mounts workspace to both containers
+* Passes env vars
+* Provides docker.sock to app-image
 
-### ✔ New Dual-Container Architecture
-
-* Clean separation of concerns
-* app-image stays lightweight
-* solver-image can be replaced/upgraded independently
-* Fully compatible with **M1/M2 ARM systems**
-* Ideal for production & CI/CD
+(نسخه کامل به زودی داخل همین پروژه قرار می‌گیرد.)
 
 ---
 
-## ▶️ Running Solver Manually (for debugging)
+# ▶️ Manual Test of Solver Image
 
-You can manually test the solver:
+Debugging the solver without the app:
 
 ```bash
 docker run --rm -it \
@@ -171,28 +199,33 @@ docker run --rm -it \
   model.geo model.export
 ```
 
-Generated output files will appear in `workspace/`.
+You should see:
+
+* Gmsh meshing logs
+* Code_Aster output log
+* Files written in `workspace/`
 
 ---
 
-## 📘 Summary Table
+# 📘 Summary Table
 
-| Container        | Purpose              | Contains           | What it does                                 |
-| ---------------- | -------------------- | ------------------ | -------------------------------------------- |
-| **app-image**    | Chat-based AI agent  | Python + LangChain | Generates GEO, COMM, EXPORT, triggers solver |
-| **solver-image** | Meshing + simulation | Gmsh + Code_Aster  | Produces MED, MESS, RESU                     |
+| Image          | Purpose                 | Includes           | Produces                                    |
+| -------------- | ----------------------- | ------------------ | ------------------------------------------- |
+| `app-image`    | AI agent, file creation | Python + LangChain | `.geo`, `.comm`, `.export`; triggers solver |
+| `solver-image` | Meshing + FEA solver    | Gmsh + Code_Aster  | `.med`, `.mess`, `.resu`, maybe `.rmed`     |
 
-Communication is handled via:
+Communication happens through:
 
-* Shared workspace volume
-* Docker CLI (`docker run …`)
+* Shared workspace
+* Docker CLI (`docker run`)
 
 ---
 
-## 📝 Notes
+# 📝 Notes
 
-* Comments in code are now standardized in **English**.
-* Gmsh options include MED 4.0 compatibility for Code_Aster.
-* Code is modular and easy to extend to cloud or cluster execution later.
+* All code comments are standardized in **English**
+* Gmsh MED version is forced to 4.0 for Code_Aster compatibility
+* Infrastructure is cloud-ready (solver can run remotely)
+* The solver-image (Code_Aster) is x86_64-only and runs on Apple Silicon via QEMU emulation, which may cause reduced performance or CPU instruction errors.
 
 ---
