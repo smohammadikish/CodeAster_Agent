@@ -184,8 +184,6 @@ The `docker-compose.yml`:
 * Passes env vars
 * Provides docker.sock to app-image
 
-(نسخه کامل به زودی داخل همین پروژه قرار می‌گیرد.)
-
 ---
 
 # ▶️ Manual Test of Solver Image
@@ -229,3 +227,92 @@ Communication happens through:
 * The solver-image (Code_Aster) is x86_64-only and runs on Apple Silicon via QEMU emulation, which may cause reduced performance or CPU instruction errors.
 
 ---
+
+🚀 How to Run the Application (Full System)
+
+This section explains exactly how to run the full system from scratch.
+
+1️⃣ Clone the repository
+git clone https://github.com/your/repo.git
+cd training
+
+2️⃣ Create the .env file in project root
+
+Create a file named .env next to docker-compose.yml:
+
+SOLVER_IMAGE=solver-image
+HOST_WORKSPACE=/absolute/path/to/training/workspace
+
+# API keys (optional)
+OPENAI_API_KEY=xxxx
+GROQ_API_KEY=xxxx
+ANTHROPIC_API_KEY=xxxx
+
+
+⚠️ Important
+
+HOST_WORKSPACE must be an absolute path on your machine.
+
+Example (for macOS):
+
+HOST_WORKSPACE=/Users/saeideh/Desktop/training/workspace
+
+3️⃣ Build both Docker images
+docker compose build
+
+
+This builds:
+
+app-image
+
+solver-image
+
+4️⃣ Start the interactive agent
+docker compose run --rm app
+
+
+You should see:
+
+🟢 INTERACTIVE CHAT AGENT MODE
+Type 'exit' to quit.
+
+
+Now the entire LangChain agent is live inside the container.
+
+5️⃣ Run a simulation through the agent
+
+The workflow inside the chat:
+
+You describe your geometry
+
+Agent generates:
+
+model.geo
+
+model.comm
+
+model.export
+
+Agent runs solver by executing:
+
+docker run solver-image model.geo model.export
+
+
+Output appears in:
+
+workspace/
+  ├── model.geo
+  ├── model.comm
+  ├── model.export
+  ├── model.med
+  ├── model.mess
+  ├── model.resu
+
+✔ The system is fully operational at this point
+
+No additional installations needed on host.
+
+🔄 How Amir can use this system :)
+
+docker compose build
+docker compose run --rm app
