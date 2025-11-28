@@ -1,0 +1,10 @@
+.git
+__pycache__
+*.pyc
+.env
+.vscode
+.idea
+.sim_data
+sim_data
+node_modules
+bar
