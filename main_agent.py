@@ -7,6 +7,8 @@ import argparse
 import json
 import logging
 import os
+import re
+import sys
 from typing import Any, Dict, List
 
 from dotenv import load_dotenv
@@ -103,6 +105,36 @@ def dict_to_pretty_json(d: Dict[str, Any]) -> str:
         return str(d)
 
 
+def console_print(*parts: object) -> None:
+    """
+    Print safely even when the terminal encoding cannot represent all characters.
+    """
+    text = " ".join(str(part) for part in parts)
+    encoding = sys.stdout.encoding or "utf-8"
+    sys.stdout.buffer.write((text + "\n").encode(encoding, errors="replace"))
+
+
+DIMENSION_WITH_OPTIONAL_UNIT = re.compile(
+    r"\b(?P<name>hy|hz|height|width|length|length_m|beam length)\b"
+    r"\s*[:=]?\s*(?P<value>-?\d+(?:[.,]\d+)?)\s*(?P<unit>mm|cm|m|meter|meters|metre|metres)?\b",
+    flags=re.IGNORECASE,
+)
+
+
+def get_ambiguous_dimension_message(user_input: str) -> str | None:
+    """
+    Reject bare geometry values like 'hy 20' unless the unit is explicit.
+    """
+    for match in DIMENSION_WITH_OPTIONAL_UNIT.finditer(user_input):
+        if not match.group("unit"):
+            return (
+                "Please specify geometry units explicitly for length, HY, and HZ. "
+                "I will not guess units for values like 'hy 20' or 'hz 10'. "
+                "Use examples such as 'HY=0.20 m', 'HZ=100 mm', or 'HZ=10 cm'."
+            )
+    return None
+
+
 # ============================================================
 #  Safe pipeline helper (used internally inside run_hybrid_pipeline)
 # ============================================================
@@ -116,27 +148,27 @@ def safe_call(tool_func, expected_file=None, **kwargs) -> bool:
     - Logs the call and errors.
     - Optionally checks for an expected output file.
     """
-    print(f"\n🚀 Running: {tool_func.name}")
+    console_print(f"\nRunning: {tool_func.name}")
     logging.info(f"Running {tool_func.name} with args={kwargs}")
     try:
         # All these are LangChain tools, so we call invoke()
         result = tool_func.invoke(kwargs)
     except Exception as e:
-        print(f"❌ Error in {tool_func.name}: {e}")
+        console_print(f"Error in {tool_func.name}: {e}")
         logging.exception(f"{tool_func.name} failed")
         return False
 
-    print(result)
+    console_print(result)
 
     if "Error" in str(result) or "❌" in str(result):
-        print(f"⛔ {tool_func.name} failed.")
+        console_print(f"{tool_func.name} failed.")
         return False
 
     if expected_file and not file_exists(expected_file):
-        print(f"⚠️ Expected file missing: {expected_file}")
+        console_print(f"Expected file missing: {expected_file}")
         return False
 
-    print(f"✅ Step '{tool_func.name}' OK.\n")
+    console_print(f"Step '{tool_func.name}' OK.\n")
     return True
 
 
@@ -157,7 +189,7 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     - This function converts all geometry from meters to millimeters BEFORE
       calling the tools, because all tools are implemented in millimeters.
     """
-    print("\n⚙️ Starting deterministic simulation pipeline...\n")
+    console_print("\nStarting deterministic simulation pipeline...\n")
 
     # -------------------------------------------------
     # Unit conversion: meters → millimeters for tools
@@ -214,7 +246,7 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
         RHO=p["RHO"],
         HY_mm=p["HY"],  # mm
         HZ_mm=p["HZ"],  # mm
-        FY=p["FY"],
+        FY_N=p["FY"],
     ):
         return "Failed in generate_comm_tool"
 
@@ -244,29 +276,44 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     # -------------------------------------------------
     # Visualization phase
     # -------------------------------------------------
-    print("\n📊 Visualization phase ...")
-    safe_call(
+    console_print("\nVisualization phase ...")
+    visualization_failures = []
+
+    if not safe_call(
         visualize_resu_tool,
         os.path.join(WORKSPACE, "beam_job.resu"),
         resu_name="beam_job.resu",
-    )
-    safe_call(
+    ):
+        visualization_failures.append("visualize_resu_tool")
+
+    if not safe_call(
         visualize_stress_tool,
         os.path.join(WORKSPACE, "tab_sie.txt"),
         stress_name="tab_sie.txt",
-    )
-    safe_call(
+    ):
+        visualization_failures.append("visualize_stress_tool")
+
+    if not safe_call(
         visualize_mfz_contour_tool,
         os.path.join(WORKSPACE, "tab_sie.txt"),
         stress_name="tab_sie.txt",
-    )
-    safe_call(
+    ):
+        visualization_failures.append("visualize_mfz_contour_tool")
+
+    if not safe_call(
         visualize_freebody_tool,
         os.path.join(WORKSPACE, "tab_reac.txt"),
         reac_name="tab_reac.txt",
-    )
+    ):
+        visualization_failures.append("visualize_freebody_tool")
 
-    print("\n🎯 All steps completed successfully — Simulation finished!\n")
+    if visualization_failures:
+        return (
+            "Simulation completed, but some visualization steps failed: "
+            + ", ".join(visualization_failures)
+        )
+
+    console_print("\nAll steps completed successfully - Simulation finished!\n")
     return "Simulation finished successfully. Results saved in 'workspace/' directory."
 
 
@@ -323,7 +370,7 @@ def run_full_pipeline(
 
     if missing:
         return (
-            "❌ Missing required parameters: "
+            "Missing required parameters: "
             + ", ".join(missing)
             + "\nPlease ask the user to provide these values in **meters (m)** for all dimensions, "
             "or explicitly approve using default values."
@@ -332,7 +379,7 @@ def run_full_pipeline(
     # 2) Check for confirmation flag
     if confirm is False:
         return (
-            "⚠️ All parameters are provided, but the simulation has NOT been confirmed.\n"
+            "All parameters are provided, but the simulation has NOT been confirmed.\n"
             "Ask the user: 'Do you confirm running the full simulation with these values (all dimensions in meters)?'"
         )
 
@@ -347,7 +394,7 @@ def run_full_pipeline(
 
     return (
         f"{summary}\n\n"
-        "🟦 Used parameters (geometry in meters as seen by the user):\n"
+        "Used parameters (geometry in meters as seen by the user):\n"
         f"{dict_to_pretty_json(params)}"
     )
 
@@ -371,20 +418,10 @@ def build_agent() -> AgentExecutor:
         api_key=openai_key,
         temperature=0,
         max_tokens=800,
-        extra_headers={"x-openai-web-search": "true"},
     )
 
-    # All tools available to the agent
+    # Expose only the guarded high-level pipeline tool to the agent.
     tools = [
-        generate_geo_tool,
-        mesh_with_gmsh_tool,
-        generate_comm_tool,
-        generate_export_tool,
-        run_code_aster_tool,
-        visualize_resu_tool,
-        visualize_stress_tool,
-        visualize_mfz_contour_tool,
-        visualize_freebody_tool,
         run_full_pipeline,  # High-level pipeline tool
     ]
 
@@ -422,10 +459,9 @@ def build_agent() -> AgentExecutor:
                     "   → Ask follow-up questions.\n"
                     "   → DO NOT assume defaults unless the user explicitly says: 'Use default values'.\n\n"
                     "3) When the user does not know material properties (E, NU, RHO):\n"
-                    "   → You MUST perform a web search using the LLM’s integrated web search.\n"
-                    "   → Retrieve standard engineering values from reputable sources.\n"
-                    "   → Always cite references using web search citation format.\n"
-                    "   → Ask the user if they accept these suggested values.\n\n"
+                    "   → Do NOT call any tools.\n"
+                    "   → Offer common approximate engineering values for steel, aluminum, or concrete.\n"
+                    "   → Clearly label them as suggested defaults and ask the user to confirm one set.\n\n"
                     "4) When ALL parameters are known:\n"
                     "   → ALWAYS summarize them clearly in meters and Newtons.\n"
                     "   → THEN ask:\n"
@@ -445,7 +481,12 @@ def build_agent() -> AgentExecutor:
                     "7) NEVER rerun run_full_pipeline automatically.\n"
                     "   → A simulation may run only once per explicit confirmation.\n"
                     "   → Never repeat runs after the user says it is finished.\n\n"
-                    "8) Maintain conversation memory and be conversational and helpful, but "
+                    "8) If the user gives a geometry number without an explicit unit "
+                    "(for example 'hy 20' or 'hz 10'):\n"
+                    "   → Treat it as ambiguous.\n"
+                    "   → Ask the user to restate that dimension with units.\n"
+                    "   → Never guess whether it means m, cm, or mm.\n\n"
+                    "9) Maintain conversation memory and be conversational and helpful, but "
                     "follow ALL rules above with 100% strictness.\n\n"
                     "============================================================\n"
                     "YOUR GOAL\n"
@@ -471,7 +512,7 @@ def build_agent() -> AgentExecutor:
     agent_executor = AgentExecutor(
         agent=agent,
         tools=tools,
-        verbose=True,
+        verbose=False,
     )
     return agent_executor
 
@@ -489,15 +530,31 @@ def run_agent_one_shot(agent_executor: AgentExecutor, user_input: str) -> None:
     - All beam dimensions MUST be provided in meters (m).
       The system converts them internally to millimeters (mm) for the tools.
     """
-    print("\n🟢 AGENT MODE (one-shot with tools)\n")
-    print("ℹ️ Please provide ALL geometry dimensions in **meters (m)**.")
-    print(
+    console_print("\nAGENT MODE (one-shot with tools)\n")
+    console_print("Please provide ALL geometry dimensions in **meters (m)**.")
+    console_print(
         "   Internally, they will be converted to millimeters (mm) for the simulation.\n"
     )
 
-    result = agent_executor.invoke({"input": user_input})
-    print("\n🤖 Agent response:\n")
-    print(result.get("output", result))
+    ambiguous_message = get_ambiguous_dimension_message(user_input)
+    if ambiguous_message:
+        console_print("\nAgent response:\n")
+        console_print(ambiguous_message)
+        return
+
+    try:
+        result = agent_executor.invoke({"input": user_input})
+    except Exception as e:
+        console_print("\nAgent error:\n")
+        console_print(
+            "The agent could not reach the language model. "
+            "Please check your OPENAI_API_KEY, network access, and local firewall settings."
+        )
+        console_print(f"Details: {e}")
+        return
+
+    console_print("\nAgent response:\n")
+    console_print(result.get("output", result))
 
 
 def run_agent_chat(agent_executor: AgentExecutor) -> None:
@@ -507,10 +564,14 @@ def run_agent_chat(agent_executor: AgentExecutor) -> None:
     - The LLM can decide to call tools at any step.
     - The user can exit with: exit, quit, stop, end, finish, cancel.
     """
-    print("\n🟢 INTERACTIVE CHAT AGENT MODE")
-    print("Type 'exit', 'quit', 'stop', 'end', 'finish', or 'cancel' to terminate.\n")
-    print("ℹ️ Please provide ALL geometry dimensions in **meters (m)**.")
-    print("   Internally, they will be converted to millimeters (mm) for the tools.\n")
+    console_print("\nINTERACTIVE CHAT AGENT MODE")
+    console_print(
+        "Type 'exit', 'quit', 'stop', 'end', 'finish', or 'cancel' to terminate.\n"
+    )
+    console_print("Please provide ALL geometry dimensions in **meters (m)**.")
+    console_print(
+        "   Internally, they will be converted to millimeters (mm) for the tools.\n"
+    )
 
     chat_history: List[BaseMessage] = []
 
@@ -520,27 +581,40 @@ def run_agent_chat(agent_executor: AgentExecutor) -> None:
 
     while True:
         try:
-            user_input = input("👤 You: ").strip()
+            user_input = input("You: ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\n👋 Bye!")
+            console_print("\nBye!")
             break
 
         if user_input.lower() in exit_commands:
-            print("\n👋 Bye! Chat session terminated.\n")
+            console_print("\nBye! Chat session terminated.\n")
             break
 
+        ambiguous_message = get_ambiguous_dimension_message(user_input)
+        if ambiguous_message:
+            console_print("\nAgent:\n" + ambiguous_message + "\n")
+            continue
+
         # Run the agent with history
-        result = agent_executor.invoke(
-            {
-                "input": user_input,
-                "chat_history": chat_history,
-            }
-        )
+        try:
+            result = agent_executor.invoke(
+                {
+                    "input": user_input,
+                    "chat_history": chat_history,
+                }
+            )
+        except Exception as e:
+            console_print(
+                "\nAgent:\nThe agent could not reach the language model. "
+                "Please check your OPENAI_API_KEY, network access, and local firewall settings."
+            )
+            console_print(f"Details: {e}\n")
+            continue
 
         output = result.get("output", "")
         output_str = str(output).strip()
 
-        print("\n🤖 Agent:\n" + output_str + "\n")
+        console_print("\nAgent:\n" + output_str + "\n")
 
         # Append only user and AI messages to history
         chat_history.append(HumanMessage(content=user_input))

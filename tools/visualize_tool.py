@@ -65,7 +65,7 @@ def visualize_resu_tool(resu_name: str = "beam_analysis.resu") -> str:
 
     # === Plot 1: Deflection ===
     plt.style.use("seaborn-v0_8-whitegrid")
-    plt.figure(figsize=(9, 3))
+    plt.figure(figsize=(9, 3.5))
     plt.plot(x_positions, dy_values * 1000, "o-", lw=2.2)
     plt.title("Beam Deflected Shape (DY)", fontsize=13, weight="bold")
     plt.xlabel("Normalized Beam Length")
@@ -82,13 +82,12 @@ def visualize_resu_tool(resu_name: str = "beam_analysis.resu") -> str:
         va="top",
         fontsize=9,
     )
-    plt.tight_layout()
     def_path = os.path.join(WORKSPACE, os.path.splitext(resu_name)[0] + "_def.png")
     plt.savefig(def_path, dpi=200)
     plt.close()
 
     # === Plot 2: Rotation ===
-    plt.figure(figsize=(9, 3))
+    plt.figure(figsize=(9, 3.5))
     plt.plot(x_positions, drz_values, "o-", lw=2.2, color="tab:red")
     plt.title("Beam Rotation Curve (DRZ)", fontsize=13, weight="bold")
     plt.xlabel("Normalized Beam Length")
@@ -105,7 +104,6 @@ def visualize_resu_tool(resu_name: str = "beam_analysis.resu") -> str:
         va="top",
         fontsize=9,
     )
-    plt.tight_layout()
     rot_path = os.path.join(WORKSPACE, os.path.splitext(resu_name)[0] + "_rot.png")
     plt.savefig(rot_path, dpi=200)
     plt.close()
@@ -180,8 +178,8 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt") -> str:
 
     # === Bending Moment Diagram ===
     plt.figure(figsize=(8, 2.2))
-    plt.plot(x, mfz / 1000, "o-", lw=2.2, color="tab:blue")
-    plt.fill_between(x, mfz / 1000, 0, color="tab:blue", alpha=0.3)
+    plt.plot(x, mfz / 1e6, "o-", lw=2.2, color="tab:blue")
+    plt.fill_between(x, mfz / 1e6, 0, color="tab:blue", alpha=0.3)
     plt.title("Bending Moment Diagram (MFZ)", fontsize=13, weight="bold")
     plt.xlabel("Normalized Beam Length")
     plt.ylabel("MZ [kN·m]")
@@ -238,9 +236,10 @@ def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt") -> str:
     x = np.array([d[1] for d in data])
     mfz = np.array([d[2] for d in data])
 
-    # Beam length check
-    beam_length = np.max(x) - np.min(x)
-    if beam_length < 0.1:
+    # Coordinates are written by the solver in millimeters.
+    x_m = x / 1000.0
+    beam_length = np.max(x_m) - np.min(x_m)
+    if beam_length < 1e-6:
         beam_length = 4.0
 
     # Move node 2 to end
@@ -260,10 +259,10 @@ def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt") -> str:
     # Plot color contour
     plt.style.use("seaborn-v0_8-whitegrid")
     fig, ax = plt.subplots(figsize=(8, 1.0))
-    for i in range(len(x) - 1):
-        ax.fill_between([x[i], x[i + 1]], 0, 0.5, color=colors[i], linewidth=0)
+    for i in range(len(x_m) - 1):
+        ax.fill_between([x_m[i], x_m[i + 1]], 0, 0.5, color=colors[i], linewidth=0)
 
-    ax.set_xlim(np.min(x), np.max(x))
+    ax.set_xlim(np.min(x_m), np.max(x_m))
     ax.set_ylim(0, 0.5)
     ax.axis("off")
     ax.set_title("Bending Moment Contour (MFZ)", fontsize=13, weight="bold")

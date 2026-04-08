@@ -9,6 +9,8 @@ dependencies = [
     "isort>=7.0.0",
     "langchain==0.2.14",
     "langchain-community==0.2.12",
+    "langchain-core==0.2.43",
+    "langchain-openai==0.1.25",
     "langchain-ollama==0.1.1",
     "matplotlib>=3.10.7",
     "numpy==1.26.4",

@@ -73,8 +73,11 @@ langchain-core==0.2.43
     # via
     #   langchain
     #   langchain-community
+    #   langchain-openai
     #   langchain-ollama
     #   langchain-text-splitters
+langchain-openai==0.1.25
+    # via codeaster-agent (pyproject.toml)
 langchain-ollama==0.1.1
     # via codeaster-agent (pyproject.toml)
 langchain-text-splitters==0.2.4

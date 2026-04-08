@@ -15,6 +15,22 @@ WORKSPACE = "workspace"
 os.makedirs(WORKSPACE, exist_ok=True)
 
 
+def _read_job_name(export_path: str) -> str:
+    """
+    Read the Code_Aster job name from the export file when available.
+    """
+    try:
+        with open(export_path, "r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 3 and parts[0] == "P" and parts[1] == "nomjob":
+                    return parts[2]
+    except OSError:
+        pass
+
+    return os.path.splitext(os.path.basename(export_path))[0]
+
+
 @tool("run_code_aster", return_direct=True)
 def run_code_aster_tool(export_name: str = "model.export") -> str:
     """
@@ -51,7 +67,7 @@ def run_code_aster_tool(export_name: str = "model.export") -> str:
         )
 
     try:
-        print(f"🔧 Running Code_Aster: {' '.join(cmd)}")
+        print(f"Running Code_Aster: {' '.join(cmd)}")
 
         result = subprocess.run(
             cmd,
@@ -68,15 +84,26 @@ def run_code_aster_tool(export_name: str = "model.export") -> str:
             )
 
         # --- Output files ---
-        job_name = os.path.splitext(os.path.basename(export_name))[0]
+        job_name = _read_job_name(export_path)
         mess = os.path.join(WORKSPACE, f"{job_name}.mess")
         resu = os.path.join(WORKSPACE, f"{job_name}.resu")
+
+        if not os.path.exists(mess) or not os.path.exists(resu):
+            return (
+                "❌ Code_Aster finished but expected result files are missing.\n"
+                f"Export: {export_path}\n"
+                f"Expected MESS: {mess}\n"
+                f"Expected RESU: {resu}\n"
+                "\n--- First lines of output ---\n"
+                + result.stdout[:500]
+                + ("..." if len(result.stdout) > 500 else "")
+            )
 
         msg = [
             "✅ Code_Aster run completed successfully.",
             f"Export: {export_path}",
-            f"MESS: {mess if os.path.exists(mess) else '(missing)'}",
-            f"RESU: {resu if os.path.exists(resu) else '(missing)'}",
+            f"MESS: {mess}",
+            f"RESU: {resu}",
             "\n--- First lines of output ---\n",
             result.stdout[:500] + ("..." if len(result.stdout) > 500 else ""),
         ]

@@ -8,19 +8,19 @@ P mpi_nbnoeud 1
 P ncpus 1
 P nomjob beam_job
 P origine CodeAster_Agent
-P rep_trav C:\Users\EX-GIGI\AppData\Local\Temp\EX-GIGI-DESKTOP-MVF74MH-interactif_8302
+P rep_trav C:\Users\EX-GIGI\AppData\Local\Temp\EX-GIGI-DESKTOP-MVF74MH-interactif_5284
 P server localhost
 P time_limit 1800.0
 P tpsjob 31
 P version stable
 A memjeveux 512.0
 A tpmax 1800.0
-F comm D:\Training_S.T.A.DATA\Version 0.2.2 - Copy\workspace\model.comm D  1
-F libr D:\Training_S.T.A.DATA\Version 0.2.2 - Copy\workspace\model.med D  20
-F mess D:\Training_S.T.A.DATA\Version 0.2.2 - Copy\workspace\beam_job.mess R  6
-F resu D:\Training_S.T.A.DATA\Version 0.2.2 - Copy\workspace\beam_job.resu R  80
-F libr D:\Training_S.T.A.DATA\Version 0.2.2 - Copy\workspace\tab_reac.txt R  18
-F libr D:\Training_S.T.A.DATA\Version 0.2.2 - Copy\workspace\tab_disp.txt R  19
-F libr D:\Training_S.T.A.DATA\Version 0.2.2 - Copy\workspace\local_axes.txt R  53
-F libr D:\Training_S.T.A.DATA\Version 0.2.2 - Copy\workspace\tab_sie.txt R  21
-R base D:\Training_S.T.A.DATA\Version 0.2.2 - Copy\workspace\beam_job_base R  0
+F comm C:\Users\EX-GIGI\training\workspace\model.comm D  1
+F libr C:\Users\EX-GIGI\training\workspace\model.med D  20
+F mess C:\Users\EX-GIGI\training\workspace\beam_job.mess R  6
+F resu C:\Users\EX-GIGI\training\workspace\beam_job.resu R  80
+F libr C:\Users\EX-GIGI\training\workspace\tab_reac.txt R  18
+F libr C:\Users\EX-GIGI\training\workspace\tab_disp.txt R  19
+F libr C:\Users\EX-GIGI\training\workspace\local_axes.txt R  53
+F libr C:\Users\EX-GIGI\training\workspace\tab_sie.txt R  21
+R base C:\Users\EX-GIGI\training\workspace\beam_job_base R  0
