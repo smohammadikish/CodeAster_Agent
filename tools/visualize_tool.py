@@ -10,21 +10,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 from langchain_core.tools import tool  # ✅ Updated for LangChain 1.x
 
-WORKSPACE = "workspace"
-os.makedirs(WORKSPACE, exist_ok=True)
+from storage import resolve_workspace_file
 
 
 # ============================================================
 # 🟦 TOOL 1 — DEFLECTION + ROTATION
 # ============================================================
 @tool("visualize_resu", return_direct=False)
-def visualize_resu_tool(resu_name: str = "beam_analysis.resu") -> str:
+def visualize_resu_tool(resu_name: str = "beam_analysis.resu", run_id: str = "") -> str:
     """
     Parse a Code_Aster .resu file and visualize:
       1) Beam deflection shape (DY)
       2) Beam rotation curve (DRZ)
     """
-    resu_path = os.path.join(WORKSPACE, resu_name)
+    resu_path = resolve_workspace_file(resu_name, "outputs", run_id or None)
     if not os.path.exists(resu_path):
         return f"❌ Error: result file '{resu_path}' not found."
 
@@ -82,7 +81,9 @@ def visualize_resu_tool(resu_name: str = "beam_analysis.resu") -> str:
         va="top",
         fontsize=9,
     )
-    def_path = os.path.join(WORKSPACE, os.path.splitext(resu_name)[0] + "_def.png")
+    def_path = resolve_workspace_file(
+        os.path.splitext(resu_name)[0] + "_def.png", "viz", run_id or None
+    )
     plt.savefig(def_path, dpi=200)
     plt.close()
 
@@ -104,7 +105,9 @@ def visualize_resu_tool(resu_name: str = "beam_analysis.resu") -> str:
         va="top",
         fontsize=9,
     )
-    rot_path = os.path.join(WORKSPACE, os.path.splitext(resu_name)[0] + "_rot.png")
+    rot_path = resolve_workspace_file(
+        os.path.splitext(resu_name)[0] + "_rot.png", "viz", run_id or None
+    )
     plt.savefig(rot_path, dpi=200)
     plt.close()
 
@@ -120,12 +123,12 @@ def visualize_resu_tool(resu_name: str = "beam_analysis.resu") -> str:
 # 🟥 TOOL 2 — STRESS CONTOUR MAP
 # ============================================================
 @tool("visualize_stress", return_direct=False)
-def visualize_stress_tool(stress_name: str = "tab_sie.txt") -> str:
+def visualize_stress_tool(stress_name: str = "tab_sie.txt", run_id: str = "") -> str:
     """
     Parse Code_Aster table from IMPR_TABLE (POST_RELEVE_T) output
     and visualize internal shear force (VY) and bending moment (MFZ).
     """
-    stress_path = os.path.join(WORKSPACE, stress_name)
+    stress_path = resolve_workspace_file(stress_name, "outputs", run_id or None)
     if not os.path.exists(stress_path):
         return f"❌ Error: file '{stress_path}' not found."
 
@@ -171,7 +174,7 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt") -> str:
     plt.xlabel("Normalized Beam Length")
     plt.ylabel("VY [kN]")
     plt.grid(True, linestyle="--", alpha=0.7)
-    v_path = os.path.join(WORKSPACE, "shear_diagram.png")
+    v_path = resolve_workspace_file("shear_diagram.png", "viz", run_id or None)
     plt.tight_layout()
     plt.savefig(v_path, dpi=200)
     plt.close()
@@ -184,7 +187,7 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt") -> str:
     plt.xlabel("Normalized Beam Length")
     plt.ylabel("MZ [kN·m]")
     plt.grid(True, linestyle="--", alpha=0.7)
-    m_path = os.path.join(WORKSPACE, "moment_diagram.png")
+    m_path = resolve_workspace_file("moment_diagram.png", "viz", run_id or None)
     plt.tight_layout()
     plt.savefig(m_path, dpi=200)
     plt.close()
@@ -203,12 +206,12 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt") -> str:
 # 🟩 TOOL 3 — BENDING MOMENT MFZ COLOR CONTOUR
 # ============================================================
 @tool("visualize_mfz_contour", return_direct=False)
-def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt") -> str:
+def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt", run_id: str = "") -> str:
     """
     Visualize bending moment MFZ along beam length as a color contour.
     Reads POST_RELEVE_T (SIEF_ELNO) output table.
     """
-    stress_path = os.path.join(WORKSPACE, stress_name)
+    stress_path = resolve_workspace_file(stress_name, "outputs", run_id or None)
     if not os.path.exists(stress_path):
         return f"❌ Error: file '{stress_path}' not found."
 
@@ -272,7 +275,7 @@ def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt") -> str:
     cbar = plt.colorbar(sm, ax=ax, orientation="horizontal", pad=0.25)
     cbar.set_label("MFZ [kN·m]", fontsize=10)
 
-    out_path = os.path.join(WORKSPACE, "mfz_contour.png")
+    out_path = resolve_workspace_file("mfz_contour.png", "viz", run_id or None)
     plt.savefig(out_path, dpi=220, bbox_inches="tight")
     plt.close()
 
@@ -532,11 +535,12 @@ def visualize_freebody_tool(
     geo_name: str = "model.geo",
     comm_name: str = "model.comm",
     unit: str = "m",
+    run_id: str = "",
 ) -> str:
     """Draw full free-body diagram including supports, loads, and reactions."""
 
     # --- Read beam length in mm from .geo ---
-    geo_path = os.path.join(WORKSPACE, geo_name)
+    geo_path = resolve_workspace_file(geo_name, "inputs", run_id or None)
     beam_length_mm = _read_beam_length(geo_path)
     if beam_length_mm is None:
         beam_length_mm = 1000.0  # fallback = 1 meter
@@ -545,13 +549,13 @@ def visualize_freebody_tool(
     beam_length = beam_length_mm / 1000.0
 
     # --- Read reactions ---
-    reac_path = os.path.join(WORKSPACE, reac_name)
+    reac_path = resolve_workspace_file(reac_name, "outputs", run_id or None)
     reac = _read_reactions(reac_path)
     if reac is None:
         return f"❌ Error: could not parse reactions from '{reac_path}'."
 
     # --- Read loads ---
-    comm_path = os.path.join(WORKSPACE, comm_name)
+    comm_path = resolve_workspace_file(comm_name, "inputs", run_id or None)
     loads = _read_loads(comm_path)
 
     # --- Figure setup ---
@@ -648,7 +652,7 @@ def visualize_freebody_tool(
     ax.axis("off")
 
     plt.tight_layout()
-    out_path = os.path.join(WORKSPACE, "freebody.png")
+    out_path = resolve_workspace_file("freebody.png", "viz", run_id or None)
     plt.savefig(out_path, dpi=250, bbox_inches="tight")
     plt.close()
 

@@ -1,18 +1,13 @@
 # ----------------------------
-#  tools/comm_generator.py  (UPDATED to match mm pipeline)
+#  tools/comm_generator.py
 # ----------------------------
 
 import os
 
 from langchain_core.tools import tool
 
-WORKSPACE = "workspace"
-os.makedirs(WORKSPACE, exist_ok=True)
+from storage import resolve_workspace_file
 
-
-# ============================================================
-#  Code_Aster .comm template (values are in millimeters)
-# ============================================================
 
 COMM_TEMPLATE = r"""
 # __________________________ Start __________________________
@@ -165,11 +160,6 @@ FIN();
 """
 
 
-# ============================================================
-#  Tool definition (arguments in **mm**)
-# ============================================================
-
-
 @tool("generate_comm", return_direct=False)
 def generate_comm_tool(
     med_name: str = "model.med",
@@ -180,6 +170,7 @@ def generate_comm_tool(
     HY_mm: float = 120.0,
     HZ_mm: float = 100.0,
     FY_N: float = -1500.0,
+    run_id: str = "",
 ) -> str:
     """
     Generate a Code_Aster .comm file.
@@ -189,13 +180,12 @@ def generate_comm_tool(
     - FY_N is the load in Newtons
     """
 
-    med_path = os.path.join(WORKSPACE, med_name)
-    comm_path = os.path.join(WORKSPACE, comm_name)
+    med_path = resolve_workspace_file(med_name, "inputs", run_id or None)
+    comm_path = resolve_workspace_file(comm_name, "inputs", run_id or None)
 
     if not os.path.exists(med_path):
-        return f"❌ Error: mesh file '{med_path}' not found."
+        return f"âŒ Error: mesh file '{med_path}' not found."
 
-    # Fill template
     content = COMM_TEMPLATE.format(
         E=E,
         NU=NU,
@@ -205,8 +195,7 @@ def generate_comm_tool(
         FY_N=FY_N,
     )
 
-    # Write file
     with open(comm_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    return f"✅ Generated {comm_name} successfully."
+    return f"âœ… Generated {comm_name} successfully."

@@ -1,17 +1,12 @@
 # ----------------------------
-#  tools/geo_generator.py (FINAL FIXED VERSION)
+#  tools/geo_generator.py
 # ----------------------------
-
-
-import os
 
 from langchain_core.tools import tool
 
-WORKSPACE = "workspace"
-os.makedirs(WORKSPACE, exist_ok=True)
+from storage import resolve_workspace_file
 
 
-# Template
 GEO_TEMPLATE = """// ---- 1D Beam geometry (OpenCASCADE) ----
 SetFactory("OpenCASCADE");
 
@@ -47,35 +42,32 @@ def generate_geo_tool(
     length_mm: float = 300,
     n_elems: int | None = None,
     geo_name: str = "model.geo",
+    run_id: str = "",
 ) -> str:
     """
     Generate a .geo file for a 1D beam.
     Input units: millimeters (mm)
     """
 
-    # Validation
     if length_mm <= 0:
-        return "❌ Error: Beam length must be > 0."
+        return "âŒ Error: Beam length must be > 0."
 
-    # Default element size = ~200 mm
     if n_elems is None:
         n_elems = max(2, int(length_mm / 200))
 
     if n_elems < 1:
-        return "❌ Error: n_elems must be >= 1."
+        return "âŒ Error: n_elems must be >= 1."
 
     n_nodes = n_elems + 1
-    geo_path = os.path.join(WORKSPACE, geo_name)
+    geo_path = resolve_workspace_file(geo_name, "inputs", run_id or None)
 
-    # Create file
     content = GEO_TEMPLATE.format(length_mm=length_mm, n_nodes=n_nodes)
     with open(geo_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    # Summary
     return (
-        f"✅ Generated {geo_name}\n"
+        f"âœ… Generated {geo_name}\n"
         f"Length = {length_mm} mm, Elements = {n_elems}, Nodes = {n_nodes}\n"
         "Groups defined: BASE, TIP, BEAM\n"
-        f"→ Saved to {os.path.abspath(geo_path)}"
+        f"â†’ Saved to {geo_path.resolve()}"
     )

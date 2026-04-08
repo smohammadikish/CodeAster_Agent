@@ -225,6 +225,7 @@ __marimo__/
 
 # workspace outputs
 workspace/
+data/*.db
 
 
 *.pyc

@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import sys
+from pathlib import Path
 from typing import Any, Dict, List
 
 from dotenv import load_dotenv
@@ -25,6 +26,9 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
 from env_loader import load_env  # noqa: E402
+from storage import (create_run_id, ensure_base_dirs, ensure_run_dirs,
+                     finalize_run, record_artifact, record_tool_event,
+                     register_run, resolve_workspace_file, utc_now_iso)
 from tools.comm_generator import generate_comm_tool
 from tools.export_generator import generate_export_tool
 from tools.geo_generator import generate_geo_tool
@@ -38,12 +42,11 @@ from tools.visualize_tool import (visualize_freebody_tool,
 # ============================================================
 #  Setup
 # ============================================================
-WORKSPACE = "workspace"
-os.makedirs(WORKSPACE, exist_ok=True)
+ensure_base_dirs()
 gmsh_bin, as_run_bin, _, openai_key, openai_model = load_env()
 
 logging.basicConfig(
-    filename=os.path.join(WORKSPACE, "hybrid_pipeline_agentic.log"),
+    filename=str(Path("workspace/logs/hybrid_pipeline_agentic.log").resolve()),
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
@@ -140,35 +143,88 @@ def get_ambiguous_dimension_message(user_input: str) -> str | None:
 # ============================================================
 
 
-def safe_call(tool_func, expected_file=None, **kwargs) -> bool:
+def _add_run_log_handler(run_id: str) -> logging.Handler:
+    run_log_path = resolve_workspace_file("pipeline.log", "logs", run_id).resolve()
+    handler = logging.FileHandler(run_log_path, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    logging.getLogger().addHandler(handler)
+    return handler
+
+
+def _remove_run_log_handler(handler: logging.Handler) -> None:
+    logger = logging.getLogger()
+    logger.removeHandler(handler)
+    handler.close()
+
+
+def safe_call(tool_func, run_id: str, expected_artifacts=None, **kwargs) -> bool:
     """
     Safely run a LangChain tool used in the deterministic pipeline.
 
     - Prints which tool is running.
     - Logs the call and errors.
-    - Optionally checks for an expected output file.
+    - Records tool events and produced artifacts.
     """
+    expected_artifacts = expected_artifacts or []
     console_print(f"\nRunning: {tool_func.name}")
     logging.info(f"Running {tool_func.name} with args={kwargs}")
+    started_at = utc_now_iso()
     try:
-        # All these are LangChain tools, so we call invoke()
-        result = tool_func.invoke(kwargs)
+        result = tool_func.invoke({**kwargs, "run_id": run_id})
     except Exception as e:
         console_print(f"Error in {tool_func.name}: {e}")
         logging.exception(f"{tool_func.name} failed")
+        record_tool_event(
+            run_id,
+            tool_func.name,
+            "failed",
+            started_at,
+            utc_now_iso(),
+            str(e),
+            kwargs,
+        )
         return False
 
     console_print(result)
 
     if "Error" in str(result) or "❌" in str(result):
         console_print(f"{tool_func.name} failed.")
+        record_tool_event(
+            run_id,
+            tool_func.name,
+            "failed",
+            started_at,
+            utc_now_iso(),
+            str(result),
+            kwargs,
+        )
         return False
 
-    if expected_file and not file_exists(expected_file):
-        console_print(f"Expected file missing: {expected_file}")
-        return False
+    for artifact_type, artifact_stage, artifact_path in expected_artifacts:
+        if not file_exists(str(artifact_path)):
+            console_print(f"Expected file missing: {artifact_path}")
+            record_tool_event(
+                run_id,
+                tool_func.name,
+                "failed",
+                started_at,
+                utc_now_iso(),
+                f"Expected file missing: {artifact_path}",
+                kwargs,
+            )
+            return False
+        record_artifact(run_id, artifact_type, artifact_stage, str(artifact_path))
 
     console_print(f"Step '{tool_func.name}' OK.\n")
+    record_tool_event(
+        run_id,
+        tool_func.name,
+        "completed",
+        started_at,
+        utc_now_iso(),
+        str(result),
+        kwargs,
+    )
     return True
 
 
@@ -317,6 +373,189 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     return "Simulation finished successfully. Results saved in 'workspace/' directory."
 
 
+def run_hybrid_pipeline_with_run_storage(params: Dict[str, Any]) -> str:
+    """
+    Run the deterministic simulation pipeline using a dedicated run folder.
+    """
+    run_id = create_run_id("beam")
+    run_paths = ensure_run_dirs(run_id)
+    register_run(run_id, params, str(run_paths.root.resolve()))
+    run_log_handler = _add_run_log_handler(run_id)
+
+    console_print(f"\nStarting deterministic simulation pipeline...\nRun ID: {run_id}\n")
+
+    try:
+        p = dict(params)
+        p["length_m"] = p["length_m"] * 1000.0
+        p["HY"] = p["HY"] * 1000.0
+        p["HZ"] = p["HZ"] * 1000.0
+
+        if p["FY"] > 0:
+            p["FY"] = -abs(p["FY"])
+
+        logging.info(
+            "run_hybrid_pipeline_with_run_storage internal (mm) params:\n"
+            + dict_to_pretty_json(p)
+        )
+
+        inputs = [
+            ("geo", "inputs", resolve_workspace_file("model.geo", "inputs", run_id)),
+            ("med", "inputs", resolve_workspace_file("model.med", "inputs", run_id)),
+            ("comm", "inputs", resolve_workspace_file("model.comm", "inputs", run_id)),
+            ("export", "inputs", resolve_workspace_file("model.export", "inputs", run_id)),
+        ]
+        outputs = [
+            ("mess", "outputs", resolve_workspace_file("beam_job.mess", "outputs", run_id)),
+            ("resu", "outputs", resolve_workspace_file("beam_job.resu", "outputs", run_id)),
+            ("tab_reac", "outputs", resolve_workspace_file("tab_reac.txt", "outputs", run_id)),
+            ("tab_disp", "outputs", resolve_workspace_file("tab_disp.txt", "outputs", run_id)),
+            ("local_axes", "outputs", resolve_workspace_file("local_axes.txt", "outputs", run_id)),
+            ("tab_sie", "outputs", resolve_workspace_file("tab_sie.txt", "outputs", run_id)),
+        ]
+        viz = [
+            ("deflection_plot", "viz", resolve_workspace_file("beam_job_def.png", "viz", run_id)),
+            ("rotation_plot", "viz", resolve_workspace_file("beam_job_rot.png", "viz", run_id)),
+            ("shear_plot", "viz", resolve_workspace_file("shear_diagram.png", "viz", run_id)),
+            ("moment_plot", "viz", resolve_workspace_file("moment_diagram.png", "viz", run_id)),
+            ("mfz_contour", "viz", resolve_workspace_file("mfz_contour.png", "viz", run_id)),
+            ("freebody_plot", "viz", resolve_workspace_file("freebody.png", "viz", run_id)),
+        ]
+
+        if not safe_call(
+            generate_geo_tool,
+            run_id,
+            expected_artifacts=[inputs[0]],
+            length_mm=p["length_m"],
+            n_elems=p["n_elems"],
+            geo_name="model.geo",
+        ):
+            finalize_run(run_id, "failed", "Failed in generate_geo_tool")
+            return f"Failed in generate_geo_tool (run_id={run_id})"
+
+        if not safe_call(
+            mesh_with_gmsh_tool,
+            run_id,
+            expected_artifacts=[inputs[1]],
+            geo_name="model.geo",
+            med_name="model.med",
+        ):
+            finalize_run(run_id, "failed", "Failed in mesh_with_gmsh_tool")
+            return f"Failed in mesh_with_gmsh_tool (run_id={run_id})"
+
+        if not safe_call(
+            generate_comm_tool,
+            run_id,
+            expected_artifacts=[inputs[2]],
+            med_name="model.med",
+            comm_name="model.comm",
+            E=p["E"],
+            NU=p["NU"],
+            RHO=p["RHO"],
+            HY_mm=p["HY"],
+            HZ_mm=p["HZ"],
+            FY_N=p["FY"],
+        ):
+            finalize_run(run_id, "failed", "Failed in generate_comm_tool")
+            return f"Failed in generate_comm_tool (run_id={run_id})"
+
+        if not safe_call(
+            generate_export_tool,
+            run_id,
+            expected_artifacts=[inputs[3]],
+            comm_name="model.comm",
+            export_name="model.export",
+            job_name="beam_job",
+            med_name="model.med",
+        ):
+            finalize_run(run_id, "failed", "Failed in generate_export_tool")
+            return f"Failed in generate_export_tool (run_id={run_id})"
+
+        if not safe_call(
+            run_code_aster_tool,
+            run_id,
+            expected_artifacts=outputs,
+            export_name="model.export",
+        ):
+            finalize_run(run_id, "failed", "Failed in run_code_aster_tool")
+            return f"Failed in run_code_aster_tool (run_id={run_id})"
+
+        console_print("\nVisualization phase ...")
+        visualization_failures = []
+
+        if not safe_call(
+            visualize_resu_tool,
+            run_id,
+            expected_artifacts=viz[0:2],
+            resu_name="beam_job.resu",
+        ):
+            visualization_failures.append("visualize_resu_tool")
+
+        if not safe_call(
+            visualize_stress_tool,
+            run_id,
+            expected_artifacts=viz[2:4],
+            stress_name="tab_sie.txt",
+        ):
+            visualization_failures.append("visualize_stress_tool")
+
+        if not safe_call(
+            visualize_mfz_contour_tool,
+            run_id,
+            expected_artifacts=[viz[4]],
+            stress_name="tab_sie.txt",
+        ):
+            visualization_failures.append("visualize_mfz_contour_tool")
+
+        if not safe_call(
+            visualize_freebody_tool,
+            run_id,
+            expected_artifacts=[viz[5]],
+            reac_name="tab_reac.txt",
+        ):
+            visualization_failures.append("visualize_freebody_tool")
+
+        meta_path = resolve_workspace_file("run.json", "meta", run_id)
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "run_id": run_id,
+                    "status": "completed_with_warnings"
+                    if visualization_failures
+                    else "completed",
+                    "params_user_units": params,
+                    "params_internal_mm": p,
+                },
+                f,
+                indent=2,
+            )
+        record_artifact(run_id, "run_metadata", "meta", str(meta_path))
+
+        if visualization_failures:
+            finalize_run(
+                run_id,
+                "completed_with_warnings",
+                "Visualization failures: " + ", ".join(visualization_failures),
+            )
+            return (
+                "Simulation completed, but some visualization steps failed: "
+                + ", ".join(visualization_failures)
+                + f"\nRun ID: {run_id}\nRun folder: {run_paths.root.resolve()}"
+            )
+
+        finalize_run(run_id, "completed")
+        console_print("\nAll steps completed successfully - Simulation finished!\n")
+        return (
+            "Simulation finished successfully.\n"
+            f"Run ID: {run_id}\n"
+            f"Run folder: {run_paths.root.resolve()}"
+        )
+    except Exception as exc:
+        finalize_run(run_id, "failed", str(exc))
+        raise
+    finally:
+        _remove_run_log_handler(run_log_handler)
+
+
 # ============================================================
 #  High-level tool: run_full_pipeline
 # ============================================================
@@ -390,7 +629,7 @@ def run_full_pipeline(
         + dict_to_pretty_json(params)
     )
 
-    summary = run_hybrid_pipeline(params)
+    summary = run_hybrid_pipeline_with_run_storage(params)
 
     return (
         f"{summary}\n\n"

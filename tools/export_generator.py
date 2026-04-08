@@ -1,18 +1,14 @@
 # --------------------------------------------------------
 #  tools/export_generator.py
-#  Responsible for generating Code_Aster .export file
 # --------------------------------------------------------
 
 import os
 
-from langchain_core.tools import tool  # ✅ Updated import for LangChain 1.x
+from langchain_core.tools import tool
 
-# Workspace directory where files will be stored
-WORKSPACE = "workspace"
-os.makedirs(WORKSPACE, exist_ok=True)
+from storage import resolve_workspace_file
 
 
-# Template of Code_Aster export file
 EXPORT_TEMPLATE = """# --- Code_Aster Export File ---
 P actions make_etude
 P debug nodebug
@@ -55,45 +51,31 @@ def generate_export_tool(
     comm_name: str = "model.comm",
     med_name: str = "model.med",
     export_name: str = "model.export",
+    run_id: str = "",
 ) -> str:
     """
     Generates a Code_Aster .export file used by as_run.
     Ensures correct file paths for COMM, MED, and result output files.
-
-    Args:
-        job_name (str): Name of the Code_Aster job
-        comm_name (str): Name of .comm file generated earlier
-        med_name (str): Name of .med mesh file from Gmsh
-        export_name (str): Output export filename
-
-    Returns:
-        str: Success or error message
     """
 
-    # Build absolute paths
-    comm_path = os.path.abspath(os.path.join(WORKSPACE, comm_name))
-    med_path = os.path.abspath(os.path.join(WORKSPACE, med_name))
-    export_path = os.path.abspath(os.path.join(WORKSPACE, export_name))
+    comm_path = resolve_workspace_file(comm_name, "inputs", run_id or None).resolve()
+    med_path = resolve_workspace_file(med_name, "inputs", run_id or None).resolve()
+    export_path = resolve_workspace_file(export_name, "inputs", run_id or None).resolve()
 
-    # Output files for Code_Aster logs and results
-    mess_path = os.path.abspath(os.path.join(WORKSPACE, f"{job_name}.mess"))
-    resu_path = os.path.abspath(os.path.join(WORKSPACE, f"{job_name}.resu"))
-    base_path = os.path.abspath(os.path.join(WORKSPACE, f"{job_name}_base"))
+    mess_path = resolve_workspace_file(f"{job_name}.mess", "outputs", run_id or None).resolve()
+    resu_path = resolve_workspace_file(f"{job_name}.resu", "outputs", run_id or None).resolve()
+    base_path = resolve_workspace_file(f"{job_name}_base", "outputs", run_id or None).resolve()
+    tab_reac = resolve_workspace_file("tab_reac.txt", "outputs", run_id or None).resolve()
+    tab_disp = resolve_workspace_file("tab_disp.txt", "outputs", run_id or None).resolve()
+    local_axes = resolve_workspace_file("local_axes.txt", "outputs", run_id or None).resolve()
+    tab_sie = resolve_workspace_file("tab_sie.txt", "outputs", run_id or None).resolve()
 
-    # Intermediate tables used by visualization tools
-    tab_reac = os.path.abspath(os.path.join(WORKSPACE, "tab_reac.txt"))
-    tab_disp = os.path.abspath(os.path.join(WORKSPACE, "tab_disp.txt"))
-    local_axes = os.path.abspath(os.path.join(WORKSPACE, "local_axes.txt"))
-    tab_sie = os.path.abspath(os.path.join(WORKSPACE, "tab_sie.txt"))
-
-    # Verify existence of required input files
     if not os.path.exists(comm_path):
-        return f"❌ Error: {comm_path} not found."
+        return f"âŒ Error: {comm_path} not found."
 
     if not os.path.exists(med_path):
-        return f"❌ Error: {med_path} not found."
+        return f"âŒ Error: {med_path} not found."
 
-    # Fill template with correct paths
     content = EXPORT_TEMPLATE.format(
         job_name=job_name,
         comm_path=comm_path,
@@ -107,8 +89,7 @@ def generate_export_tool(
         base_path=base_path,
     )
 
-    # Write .export file
     with open(export_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    return f"✅ Export file generated: {export_path}"
+    return f"âœ… Export file generated: {export_path}"
