@@ -26,6 +26,7 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
 from env_loader import load_env  # noqa: E402
+from input_parser import ParameterSheet, build_state_aware_input, parse_beam_request
 from storage import (create_run_id, ensure_base_dirs, ensure_run_dirs,
                      finalize_run, record_artifact, record_tool_event,
                      register_run, resolve_workspace_file, utc_now_iso)
@@ -38,6 +39,7 @@ from tools.validators import file_exists
 from tools.visualize_tool import (visualize_freebody_tool,
                                   visualize_mfz_contour_tool,
                                   visualize_resu_tool, visualize_stress_tool)
+from units import DEFAULT_UNIT_POLICY, normalize_user_params_mixed_units
 
 # ============================================================
 #  Setup
@@ -70,6 +72,8 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     "HZ": 0.10,  # m
     "FY": -1500.0,  # N (negative = downward)
 }
+DEFAULT_INPUT_LENGTH_UNIT = DEFAULT_UNIT_POLICY.user_length_unit
+DEFAULT_INPUT_FORCE_UNIT = DEFAULT_UNIT_POLICY.user_force_unit
 
 
 # ============================================================
@@ -373,7 +377,13 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     return "Simulation finished successfully. Results saved in 'workspace/' directory."
 
 
-def run_hybrid_pipeline_with_run_storage(params: Dict[str, Any]) -> str:
+def run_hybrid_pipeline_with_run_storage(
+    params: Dict[str, Any],
+    length_unit: str = DEFAULT_INPUT_LENGTH_UNIT,
+    hy_unit: str = DEFAULT_INPUT_LENGTH_UNIT,
+    hz_unit: str = DEFAULT_INPUT_LENGTH_UNIT,
+    force_unit: str = DEFAULT_INPUT_FORCE_UNIT,
+) -> str:
     """
     Run the deterministic simulation pipeline using a dedicated run folder.
     """
@@ -386,9 +396,14 @@ def run_hybrid_pipeline_with_run_storage(params: Dict[str, Any]) -> str:
 
     try:
         p = dict(params)
-        p["length_m"] = p["length_m"] * 1000.0
-        p["HY"] = p["HY"] * 1000.0
-        p["HZ"] = p["HZ"] * 1000.0
+        p = normalize_user_params_mixed_units(
+            p,
+            DEFAULT_UNIT_POLICY,
+            length_unit=length_unit,
+            hy_unit=hy_unit,
+            hz_unit=hz_unit,
+            force_unit=force_unit,
+        )
 
         if p["FY"] > 0:
             p["FY"] = -abs(p["FY"])
@@ -523,7 +538,14 @@ def run_hybrid_pipeline_with_run_storage(params: Dict[str, Any]) -> str:
                     if visualization_failures
                     else "completed",
                     "params_user_units": params,
+                    "input_units": {
+                        "length": length_unit,
+                        "HY": hy_unit,
+                        "HZ": hz_unit,
+                        "force": force_unit,
+                    },
                     "params_internal_mm": p,
+                    "unit_policy": DEFAULT_UNIT_POLICY.to_dict(),
                 },
                 f,
                 indent=2,
@@ -571,16 +593,20 @@ def run_full_pipeline(
     HY: float = None,
     HZ: float = None,
     FY: float = None,
+    length_unit: str = DEFAULT_INPUT_LENGTH_UNIT,
+    hy_unit: str = DEFAULT_INPUT_LENGTH_UNIT,
+    hz_unit: str = DEFAULT_INPUT_LENGTH_UNIT,
+    force_unit: str = DEFAULT_INPUT_FORCE_UNIT,
     confirm: bool = False,
 ) -> str:
     """
     Run the complete simulation pipeline ONLY after explicit user confirmation.
 
     IMPORTANT UNITS (FOR THE USER / LLM SIDE):
-    - length_m: beam length in meters (m)
-    - HY: section height in meters (m)
-    - HZ: section width in meters (m)
-    - FY: load in Newtons (N), positive or negative (negative = downward)
+    - length_m: beam length in `length_unit`
+    - HY: section height in `hy_unit`
+    - HZ: section width in `hz_unit`
+    - FY: load in `force_unit`, positive or negative
     - E: Young's modulus [Pa]
     - NU: Poisson ratio [-]
     - RHO: density [kg/m^3]
@@ -603,15 +629,23 @@ def run_full_pipeline(
         "HY": HY,
         "HZ": HZ,
         "FY": FY,
+        "length_unit": length_unit,
+        "hy_unit": hy_unit,
+        "hz_unit": hz_unit,
+        "force_unit": force_unit,
     }
 
-    missing = [name for name, val in params_raw.items() if val is None]
+    missing = [
+        name
+        for name, val in params_raw.items()
+        if name not in {"length_unit", "hy_unit", "hz_unit", "force_unit"} and val is None
+    ]
 
     if missing:
         return (
             "Missing required parameters: "
             + ", ".join(missing)
-            + "\nPlease ask the user to provide these values in **meters (m)** for all dimensions, "
+            + "\nPlease ask the user to provide these values together with explicit units, "
             "or explicitly approve using default values."
         )
 
@@ -619,21 +653,39 @@ def run_full_pipeline(
     if confirm is False:
         return (
             "All parameters are provided, but the simulation has NOT been confirmed.\n"
-            "Ask the user: 'Do you confirm running the full simulation with these values (all dimensions in meters)?'"
+            "Ask the user to confirm the full simulation with the stated units."
         )
 
     # 3) All good → run pipeline
-    params = coerce_params(params_raw)
+    params = coerce_params(
+        {
+            "length_m": length_m,
+            "n_elems": n_elems,
+            "E": E,
+            "NU": NU,
+            "RHO": RHO,
+            "HY": HY,
+            "HZ": HZ,
+            "FY": FY,
+        }
+    )
     logging.info(
-        "run_full_pipeline confirmed with params (in meters):\n"
+        "run_full_pipeline confirmed with params (user units):\n"
         + dict_to_pretty_json(params)
     )
 
-    summary = run_hybrid_pipeline_with_run_storage(params)
+    summary = run_hybrid_pipeline_with_run_storage(
+        params,
+        length_unit=length_unit,
+        hy_unit=hy_unit,
+        hz_unit=hz_unit,
+        force_unit=force_unit,
+    )
 
     return (
         f"{summary}\n\n"
-        "Used parameters (geometry in meters as seen by the user):\n"
+        f"Input units: length={length_unit}, HY={hy_unit}, HZ={hz_unit}, force={force_unit}\n"
+        "Used parameters:\n"
         f"{dict_to_pretty_json(params)}"
     )
 
@@ -641,6 +693,164 @@ def run_full_pipeline(
 # ============================================================
 #  Agent construction
 # ============================================================
+
+
+def build_system_prompt() -> str:
+    return (
+        "You are a mechanical simulation assistant specialized in beam analysis "
+        "using Code_Aster and Gmsh. You support multi-step conversations where "
+        "the user incrementally provides beam geometry, material properties, "
+        "cross-section dimensions, and loads.\n\n"
+        "============================================================\n"
+        "UNITS CONVENTION (CRITICAL)\n"
+        "============================================================\n"
+        "- The user may provide mixed units such as m, cm, mm, N, or kN.\n"
+        "- You MUST accept explicit user units and convert them internally.\n"
+        "- Do NOT ask the user to manually convert 20 cm to 0.20 m or 1.2 kN to 1200 N.\n"
+        "- Keep every numeric value together with its own unit while collecting data.\n"
+        "- If the user says '5 m long, 20 cm high, 12 cm wide, 1.2 kN load', treat that as valid.\n"
+        "- Only ask follow-up questions when a value is missing or a unit is absent and ambiguous.\n\n"
+        "============================================================\n"
+        "BEHAVIOR RULES — FOLLOW THESE STRICTLY\n"
+        "============================================================\n\n"
+        "1) DO NOT call any tools until ALL required parameters are known:\n"
+        "   - length_m  (beam length)\n"
+        "   - n_elems   (integer)\n"
+        "   - E         (Young's modulus)\n"
+        "   - NU        (Poisson ratio)\n"
+        "   - RHO       (density)\n"
+        "   - HY        (cross-section height)\n"
+        "   - HZ        (cross-section width)\n"
+        "   - FY        (load)\n\n"
+        "2) When calling run_full_pipeline, pass units explicitly per field:\n"
+        "   - length_unit for length_m\n"
+        "   - hy_unit for HY\n"
+        "   - hz_unit for HZ\n"
+        "   - force_unit for FY\n"
+        "   Allowed length units: m, cm, mm. Allowed force units: N, kN.\n\n"
+        "3) If ANY required value is missing:\n"
+        "   → Ask follow-up questions.\n"
+        "   → DO NOT assume defaults unless the user explicitly says: 'Use default values'.\n\n"
+        "4) When the user does not know material properties (E, NU, RHO):\n"
+        "   → Do NOT call any tools.\n"
+        "   → Offer common approximate engineering values for steel, aluminum, or concrete.\n"
+        "   → Clearly label them as suggested defaults and ask the user to confirm one set.\n\n"
+        "5) When ALL parameters are known:\n"
+        "   → Summarize them clearly and preserve the user's units.\n"
+        "   → THEN ask:\n"
+        '       "Do you confirm running the simulation with these values?"\n'
+        "   → NEVER call run_full_pipeline unless the user explicitly confirms with:\n"
+        "       'yes', 'confirm', 'ok run', or similar.\n\n"
+        "6) If the user responds with 'no' or 'not yet':\n"
+        "   → DO NOT call any tools.\n"
+        "   → Ask what they want to modify.\n\n"
+        "7) FINALIZATION / STOP RULES:\n"
+        "   If the user says ANY of these in the conversation:\n"
+        "       'stop', 'finish', 'end', 'cancel', 'no more', 'terminate', 'that's enough', 'done'\n"
+        "   → Immediately stop all simulation workflow.\n"
+        "   → DO NOT call any tools.\n"
+        "   → Simply acknowledge and wait for the next input (or let the CLI handle exit).\n"
+        "   → Never restart the simulation pipeline unless the user explicitly asks.\n\n"
+        "8) NEVER rerun run_full_pipeline automatically.\n"
+        "   → A simulation may run only once per explicit confirmation.\n"
+        "   → Never repeat runs after the user says it is finished.\n\n"
+        "9) If the user gives a geometry number without an explicit unit "
+        "(for example 'hy 20' or 'hz 10'):\n"
+        "   → Treat it as ambiguous.\n"
+        "   → Ask the user to restate that dimension with units.\n"
+        "   → Never guess whether it means m, cm, or mm.\n\n"
+        "10) Maintain conversation memory and be conversational and helpful, but "
+        "follow ALL rules above with 100% strictness.\n\n"
+        "============================================================\n"
+        "YOUR GOAL\n"
+        "============================================================\n"
+        "Guide the user step-by-step, help determine missing values, ensure explicit "
+        "confirmation before executing any tools, and respect all stop commands."
+    )
+
+
+def is_confirmation_input(user_input: str) -> bool:
+    text = user_input.strip().lower()
+    return bool(
+        re.search(
+            r"\b(yes|confirm|confirmed|i confirm|ok run|run it|yes run it|please run)\b",
+            text,
+        )
+    )
+
+
+def is_exit_input(user_input: str) -> bool:
+    text = user_input.strip().lower()
+    return bool(
+        re.search(
+            r"\b(exit|quit|stop|end|finish|cancel|bye|goodbye|ok bye|thanks|thank you|ok thanks)\b",
+            text,
+        )
+    )
+
+
+def build_post_run_message() -> str:
+    return (
+        "The simulation has already been completed for the current parameter sheet.\n"
+        "If you want another run, change one or more parameters or start a new analysis."
+    )
+
+
+def build_post_success_message(run_output: str) -> str:
+    lines = [line.rstrip() for line in str(run_output).splitlines() if line.strip()]
+    kept: list[str] = []
+    for line in lines:
+        if line.startswith("Input units:") or line.startswith("Used parameters:"):
+            break
+        kept.append(line)
+    if not kept:
+        kept = ["Simulation finished successfully."]
+    kept.append("Would you like to do another analysis or finish the process?")
+    return "\n".join(kept)
+
+
+def build_post_run_idle_message() -> str:
+    return "Would you like to do another analysis or finish the process?"
+
+
+def get_sheet_signature(sheet: ParameterSheet) -> str:
+    return json.dumps(sheet.to_dict(), sort_keys=True, ensure_ascii=True)
+
+
+def build_confirmation_summary(sheet: ParameterSheet) -> str:
+    values = sheet.to_dict()
+    return (
+        "All required parameters are available.\n"
+        "Current values:\n"
+        f"- Length: {values['length_m']} {values.get('length_unit', DEFAULT_INPUT_LENGTH_UNIT)}\n"
+        f"- Elements: {values['n_elems']}\n"
+        f"- HY: {values['HY']} {values.get('hy_unit', DEFAULT_INPUT_LENGTH_UNIT)}\n"
+        f"- HZ: {values['HZ']} {values.get('hz_unit', DEFAULT_INPUT_LENGTH_UNIT)}\n"
+        f"- FY: {values['FY']} {values.get('force_unit', DEFAULT_INPUT_FORCE_UNIT)}\n"
+        f"- E: {values['E']}\n"
+        f"- NU: {values['NU']}\n"
+        f"- RHO: {values['RHO']}\n"
+        "Reply with 'yes', 'confirm', or 'run it' to start the simulation."
+    )
+
+
+def build_pipeline_kwargs_from_sheet(sheet: ParameterSheet) -> dict[str, Any]:
+    values = sheet.to_dict()
+    return {
+        "length_m": values["length_m"],
+        "n_elems": values["n_elems"],
+        "E": values["E"],
+        "NU": values["NU"],
+        "RHO": values["RHO"],
+        "HY": values["HY"],
+        "HZ": values["HZ"],
+        "FY": values["FY"],
+        "length_unit": values.get("length_unit", DEFAULT_INPUT_LENGTH_UNIT),
+        "hy_unit": values.get("hy_unit", DEFAULT_INPUT_LENGTH_UNIT),
+        "hz_unit": values.get("hz_unit", DEFAULT_INPUT_LENGTH_UNIT),
+        "force_unit": values.get("force_unit", DEFAULT_INPUT_FORCE_UNIT),
+        "confirm": True,
+    }
 
 
 def build_agent() -> AgentExecutor:
@@ -669,71 +879,7 @@ def build_agent() -> AgentExecutor:
         [
             (
                 "system",
-                (
-                    "You are a mechanical simulation assistant specialized in beam analysis "
-                    "using Code_Aster and Gmsh. You support multi-step conversations where "
-                    "the user incrementally provides beam geometry, material properties, "
-                    "cross-section dimensions, and loads.\n\n"
-                    "============================================================\n"
-                    "UNITS CONVENTION (CRITICAL)\n"
-                    "============================================================\n"
-                    "- All dimensions that the USER provides MUST be in **meters (m)**.\n"
-                    "- When you summarize or discuss parameters with the user, ALWAYS keep them in meters.\n"
-                    "- The internal deterministic pipeline will convert meters to millimeters for the tools.\n"
-                    "- DO NOT convert meters to millimeters yourself when talking to the user.\n"
-                    "- DO NOT show millimeters to the user. Stay in meters at the conversation level.\n\n"
-                    "============================================================\n"
-                    "BEHAVIOR RULES — FOLLOW THESE STRICTLY\n"
-                    "============================================================\n\n"
-                    "1) DO NOT call any tools until ALL required parameters are known:\n"
-                    "   - length_m  (beam length in meters)\n"
-                    "   - n_elems   (integer)\n"
-                    "   - E         (Young's modulus)\n"
-                    "   - NU        (Poisson ratio)\n"
-                    "   - RHO       (density)\n"
-                    "   - HY        (cross-section height in meters)\n"
-                    "   - HZ        (cross-section width in meters)\n"
-                    "   - FY        (load in Newtons)\n\n"
-                    "2) If ANY of these parameters are missing:\n"
-                    "   → Ask follow-up questions.\n"
-                    "   → DO NOT assume defaults unless the user explicitly says: 'Use default values'.\n\n"
-                    "3) When the user does not know material properties (E, NU, RHO):\n"
-                    "   → Do NOT call any tools.\n"
-                    "   → Offer common approximate engineering values for steel, aluminum, or concrete.\n"
-                    "   → Clearly label them as suggested defaults and ask the user to confirm one set.\n\n"
-                    "4) When ALL parameters are known:\n"
-                    "   → ALWAYS summarize them clearly in meters and Newtons.\n"
-                    "   → THEN ask:\n"
-                    '       "Do you confirm running the simulation with these values?"\n'
-                    "   → NEVER call run_full_pipeline unless the user explicitly confirms with:\n"
-                    "       'yes', 'confirm', 'ok run', or similar.\n\n"
-                    "5) If the user responds with 'no' or 'not yet':\n"
-                    "   → DO NOT call any tools.\n"
-                    "   → Ask what they want to modify.\n\n"
-                    "6) FINALIZATION / STOP RULES:\n"
-                    "   If the user says ANY of these in the conversation:\n"
-                    "       'stop', 'finish', 'end', 'cancel', 'no more', 'terminate', 'that's enough', 'done'\n"
-                    "   → Immediately stop all simulation workflow.\n"
-                    "   → DO NOT call any tools.\n"
-                    "   → Simply acknowledge and wait for the next input (or let the CLI handle exit).\n"
-                    "   → Never restart the simulation pipeline unless the user explicitly asks.\n\n"
-                    "7) NEVER rerun run_full_pipeline automatically.\n"
-                    "   → A simulation may run only once per explicit confirmation.\n"
-                    "   → Never repeat runs after the user says it is finished.\n\n"
-                    "8) If the user gives a geometry number without an explicit unit "
-                    "(for example 'hy 20' or 'hz 10'):\n"
-                    "   → Treat it as ambiguous.\n"
-                    "   → Ask the user to restate that dimension with units.\n"
-                    "   → Never guess whether it means m, cm, or mm.\n\n"
-                    "9) Maintain conversation memory and be conversational and helpful, but "
-                    "follow ALL rules above with 100% strictness.\n\n"
-                    "============================================================\n"
-                    "YOUR GOAL\n"
-                    "============================================================\n"
-                    "Guide the user step-by-step, help determine missing values (including via web "
-                    "search), ensure explicit confirmation before executing any tools, and respect "
-                    "all stop commands."
-                ),
+                build_system_prompt(),
             ),
             # Chat history buffer
             MessagesPlaceholder("chat_history", optional=True),
@@ -756,23 +902,35 @@ def build_agent() -> AgentExecutor:
     return agent_executor
 
 
+def build_state_extractor_llm() -> ChatOpenAI:
+    return ChatOpenAI(
+        model=openai_model or "gpt-4.1",
+        api_key=openai_key,
+        temperature=0,
+        max_tokens=500,
+    )
+
+
 # ============================================================
 #  CLI / Entry point
 # ============================================================
 
 
-def run_agent_one_shot(agent_executor: AgentExecutor, user_input: str) -> None:
+def run_agent_one_shot(
+    agent_executor: AgentExecutor, user_input: str, extractor_llm: Any | None = None
+) -> None:
     """
     One-shot execution (mode=agent): LLM decides which tools to use.
 
     NOTE TO THE USER (printed once before running):
-    - All beam dimensions MUST be provided in meters (m).
-      The system converts them internally to millimeters (mm) for the tools.
+    - Beam dimensions may be provided in m, cm, or mm.
+    - Loads may be provided in N or kN.
+    - The system converts them internally for the tools.
     """
     console_print("\nAGENT MODE (one-shot with tools)\n")
-    console_print("Please provide ALL geometry dimensions in **meters (m)**.")
+    console_print("Please provide geometry with explicit units such as m, cm, mm, N, or kN.")
     console_print(
-        "   Internally, they will be converted to millimeters (mm) for the simulation.\n"
+        "   Example: 5 m beam, 20 cm height, 12 cm width, 1.2 kN load.\n"
     )
 
     ambiguous_message = get_ambiguous_dimension_message(user_input)
@@ -782,7 +940,9 @@ def run_agent_one_shot(agent_executor: AgentExecutor, user_input: str) -> None:
         return
 
     try:
-        result = agent_executor.invoke({"input": user_input})
+        sheet = ParameterSheet()
+        state_input = build_state_aware_input(user_input, sheet, llm=extractor_llm)
+        result = agent_executor.invoke({"input": state_input})
     except Exception as e:
         console_print("\nAgent error:\n")
         console_print(
@@ -796,7 +956,7 @@ def run_agent_one_shot(agent_executor: AgentExecutor, user_input: str) -> None:
     console_print(result.get("output", result))
 
 
-def run_agent_chat(agent_executor: AgentExecutor) -> None:
+def run_agent_chat(agent_executor: AgentExecutor, extractor_llm: Any | None = None) -> None:
     """
     Full interactive chat mode:
     - Keeps history between turns.
@@ -807,16 +967,17 @@ def run_agent_chat(agent_executor: AgentExecutor) -> None:
     console_print(
         "Type 'exit', 'quit', 'stop', 'end', 'finish', or 'cancel' to terminate.\n"
     )
-    console_print("Please provide ALL geometry dimensions in **meters (m)**.")
+    console_print("Please provide geometry and load values with explicit units.")
     console_print(
-        "   Internally, they will be converted to millimeters (mm) for the tools.\n"
+        "   Example: 5 m beam, 20 cm height, 12 cm width, 1.2 kN load.\n"
     )
 
     chat_history: List[BaseMessage] = []
+    parameter_sheet = ParameterSheet()
+    simulation_executed = False
+    last_executed_signature: str | None = None
 
     from langchain_core.messages import AIMessage, HumanMessage
-
-    exit_commands = {"exit", "quit", "stop", "end", "finish", "cancel"}
 
     while True:
         try:
@@ -825,7 +986,7 @@ def run_agent_chat(agent_executor: AgentExecutor) -> None:
             console_print("\nBye!")
             break
 
-        if user_input.lower() in exit_commands:
+        if is_exit_input(user_input):
             console_print("\nBye! Chat session terminated.\n")
             break
 
@@ -836,9 +997,52 @@ def run_agent_chat(agent_executor: AgentExecutor) -> None:
 
         # Run the agent with history
         try:
+            parsed_update = parse_beam_request(user_input)
+            state_input = build_state_aware_input(
+                user_input, parameter_sheet, llm=extractor_llm
+            )
+            current_signature = get_sheet_signature(parameter_sheet)
+            if last_executed_signature is not None and current_signature != last_executed_signature:
+                simulation_executed = False
+
+            if simulation_executed and not parsed_update:
+                output_str = build_post_run_idle_message()
+                console_print("\nAgent:\n" + output_str + "\n")
+                chat_history.append(HumanMessage(content=user_input))
+                chat_history.append(AIMessage(content=output_str))
+                continue
+
+            if simulation_executed and is_confirmation_input(user_input):
+                output_str = build_post_run_message()
+                console_print("\nAgent:\n" + output_str + "\n")
+                chat_history.append(HumanMessage(content=user_input))
+                chat_history.append(AIMessage(content=output_str))
+                continue
+
+            if not parameter_sheet.missing_required_fields():
+                if is_confirmation_input(user_input):
+                    run_output = str(
+                        run_full_pipeline.invoke(
+                            build_pipeline_kwargs_from_sheet(parameter_sheet)
+                        )
+                    ).strip()
+                    output_str = build_post_success_message(run_output)
+                    simulation_executed = True
+                    last_executed_signature = get_sheet_signature(parameter_sheet)
+                    console_print("\nAgent:\n" + output_str + "\n")
+                    chat_history.append(HumanMessage(content=user_input))
+                    chat_history.append(AIMessage(content=output_str))
+                    continue
+
+                output_str = build_confirmation_summary(parameter_sheet)
+                console_print("\nAgent:\n" + output_str + "\n")
+                chat_history.append(HumanMessage(content=user_input))
+                chat_history.append(AIMessage(content=output_str))
+                continue
+
             result = agent_executor.invoke(
                 {
-                    "input": user_input,
+                    "input": state_input,
                     "chat_history": chat_history,
                 }
             )
@@ -885,11 +1089,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     agent_executor = build_agent()
+    extractor_llm = build_state_extractor_llm()
 
     if args.mode == "agent":
         if not args.input:
             raise ValueError("--input is required in agent mode.")
-        run_agent_one_shot(agent_executor, args.input)
+        run_agent_one_shot(agent_executor, args.input, extractor_llm=extractor_llm)
 
     elif args.mode == "chat":
-        run_agent_chat(agent_executor)
+        run_agent_chat(agent_executor, extractor_llm=extractor_llm)

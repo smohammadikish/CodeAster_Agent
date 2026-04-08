@@ -11,6 +11,7 @@ import numpy as np
 from langchain_core.tools import tool  # ✅ Updated for LangChain 1.x
 
 from storage import resolve_workspace_file
+from units import DEFAULT_UNIT_POLICY, convert_force, convert_length, convert_moment
 
 
 # ============================================================
@@ -65,18 +66,30 @@ def visualize_resu_tool(resu_name: str = "beam_analysis.resu", run_id: str = "")
     # === Plot 1: Deflection ===
     plt.style.use("seaborn-v0_8-whitegrid")
     plt.figure(figsize=(9, 3.5))
-    plt.plot(x_positions, dy_values * 1000, "o-", lw=2.2)
+    dy_display = np.array(
+        [
+            convert_length(
+                value,
+                DEFAULT_UNIT_POLICY.solver_displacement_unit,
+                DEFAULT_UNIT_POLICY.visualization_displacement_unit,
+            )
+            for value in dy_values
+        ]
+    )
+    plt.plot(x_positions, dy_display, "o-", lw=2.2)
     plt.title("Beam Deflected Shape (DY)", fontsize=13, weight="bold")
     plt.xlabel("Normalized Beam Length")
-    plt.ylabel("Vertical Deflection [mm]")
+    plt.ylabel(
+        f"Vertical Deflection [{DEFAULT_UNIT_POLICY.visualization_displacement_unit}]"
+    )
     plt.grid(True, linestyle="--", alpha=0.7)
-    max_disp = np.min(dy_values) * 1000
-    tip_idx = np.argmin(dy_values)
-    plt.scatter(x_positions[tip_idx], dy_values[tip_idx] * 1000, color="red", zorder=5)
+    max_disp = np.min(dy_display)
+    tip_idx = np.argmin(dy_display)
+    plt.scatter(x_positions[tip_idx], dy_display[tip_idx], color="red", zorder=5)
     plt.text(
         x_positions[tip_idx],
-        dy_values[tip_idx] * 1000 - 5,
-        f"{max_disp:.1f} mm",
+        dy_display[tip_idx] - 5,
+        f"{max_disp:.1f} {DEFAULT_UNIT_POLICY.visualization_displacement_unit}",
         color="red",
         va="top",
         fontsize=9,
@@ -115,7 +128,7 @@ def visualize_resu_tool(resu_name: str = "beam_analysis.resu", run_id: str = "")
         f"✅ Visualizations saved:\n"
         f"📉 Deflection: {def_path}\n"
         f"📈 Rotation: {rot_path}\n"
-        f"📊 Nodes: {len(node_ids)} | Max DY = {max_disp:.3f} mm | Max DRZ = {max_rot:.4f} rad"
+        f"📊 Nodes: {len(node_ids)} | Max DY = {max_disp:.3f} {DEFAULT_UNIT_POLICY.visualization_displacement_unit} | Max DRZ = {max_rot:.4f} {DEFAULT_UNIT_POLICY.visualization_rotation_unit}"
     )
 
 
@@ -165,14 +178,35 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt", run_id: str = "") ->
 
     x = np.linspace(0, 1, len(node_ids))
 
+    vy_display = np.array(
+        [
+            convert_force(
+                value,
+                DEFAULT_UNIT_POLICY.solver_force_unit,
+                DEFAULT_UNIT_POLICY.visualization_force_unit,
+            )
+            for value in vy
+        ]
+    )
+    mfz_display = np.array(
+        [
+            convert_moment(
+                value,
+                DEFAULT_UNIT_POLICY.solver_moment_unit,
+                DEFAULT_UNIT_POLICY.visualization_moment_unit,
+            )
+            for value in mfz
+        ]
+    )
+
     # === Shear Force Diagram ===
     plt.style.use("seaborn-v0_8-whitegrid")
     plt.figure(figsize=(8, 2.2))
-    plt.plot(x, vy / 1000, "o-", lw=2.2, color="tab:orange")
-    plt.fill_between(x, vy / 1000, 0, color="tab:orange", alpha=0.3)
+    plt.plot(x, vy_display, "o-", lw=2.2, color="tab:orange")
+    plt.fill_between(x, vy_display, 0, color="tab:orange", alpha=0.3)
     plt.title("Shear Force Diagram (VY)", fontsize=13, weight="bold")
     plt.xlabel("Normalized Beam Length")
-    plt.ylabel("VY [kN]")
+    plt.ylabel(f"VY [{DEFAULT_UNIT_POLICY.visualization_force_unit}]")
     plt.grid(True, linestyle="--", alpha=0.7)
     v_path = resolve_workspace_file("shear_diagram.png", "viz", run_id or None)
     plt.tight_layout()
@@ -181,11 +215,11 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt", run_id: str = "") ->
 
     # === Bending Moment Diagram ===
     plt.figure(figsize=(8, 2.2))
-    plt.plot(x, mfz / 1e6, "o-", lw=2.2, color="tab:blue")
-    plt.fill_between(x, mfz / 1e6, 0, color="tab:blue", alpha=0.3)
+    plt.plot(x, mfz_display, "o-", lw=2.2, color="tab:blue")
+    plt.fill_between(x, mfz_display, 0, color="tab:blue", alpha=0.3)
     plt.title("Bending Moment Diagram (MFZ)", fontsize=13, weight="bold")
     plt.xlabel("Normalized Beam Length")
-    plt.ylabel("MZ [kN·m]")
+    plt.ylabel(f"MZ [{DEFAULT_UNIT_POLICY.visualization_moment_unit}]")
     plt.grid(True, linestyle="--", alpha=0.7)
     m_path = resolve_workspace_file("moment_diagram.png", "viz", run_id or None)
     plt.tight_layout()
@@ -197,8 +231,8 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt", run_id: str = "") ->
         f"🟠 Shear: {v_path}\n"
         f"🔵 Moment: {m_path}\n"
         f"📊 Nodes: {len(node_ids)} | "
-        f"VY range: {np.min(vy):.1f} → {np.max(vy):.1f} N | "
-        f"MFZ range: {np.min(mfz):.1f} → {np.max(mfz):.1f} N·mm"
+        f"VY range: {np.min(vy_display):.1f} → {np.max(vy_display):.1f} {DEFAULT_UNIT_POLICY.visualization_force_unit} | "
+        f"MFZ range: {np.min(mfz_display):.1f} → {np.max(mfz_display):.1f} {DEFAULT_UNIT_POLICY.visualization_moment_unit}"
     )
 
 
@@ -239,9 +273,17 @@ def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt", run_id: str = "
     x = np.array([d[1] for d in data])
     mfz = np.array([d[2] for d in data])
 
-    # Coordinates are written by the solver in millimeters.
-    x_m = x / 1000.0
-    beam_length = np.max(x_m) - np.min(x_m)
+    x_display = np.array(
+        [
+            convert_length(
+                value,
+                DEFAULT_UNIT_POLICY.solver_coordinate_unit,
+                DEFAULT_UNIT_POLICY.visualization_length_unit,
+            )
+            for value in x
+        ]
+    )
+    beam_length = np.max(x_display) - np.min(x_display)
     if beam_length < 1e-6:
         beam_length = 4.0
 
@@ -250,22 +292,33 @@ def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt", run_id: str = "
         idx2 = np.where(node_ids == 2)[0][0]
         node_ids = np.concatenate((np.delete(node_ids, idx2), [2]))
         x = np.concatenate((np.delete(x, idx2), [x[idx2]]))
+        x_display = np.concatenate((np.delete(x_display, idx2), [x_display[idx2]]))
         mfz = np.concatenate((np.delete(mfz, idx2), [mfz[idx2]]))
 
-    # Convert N·mm → kN·m
-    mfz_kNm = mfz / 1e6 if np.max(np.abs(mfz)) > 1e5 else mfz / 1e3
+    mfz_display = np.array(
+        [
+            convert_moment(
+                value,
+                DEFAULT_UNIT_POLICY.solver_moment_unit,
+                DEFAULT_UNIT_POLICY.visualization_moment_unit,
+            )
+            for value in mfz
+        ]
+    )
 
     cmap = plt.get_cmap("turbo")
-    norm = plt.Normalize(vmin=np.min(mfz_kNm), vmax=np.max(mfz_kNm))
-    colors = cmap(norm(mfz_kNm))
+    norm = plt.Normalize(vmin=np.min(mfz_display), vmax=np.max(mfz_display))
+    colors = cmap(norm(mfz_display))
 
     # Plot color contour
     plt.style.use("seaborn-v0_8-whitegrid")
     fig, ax = plt.subplots(figsize=(8, 1.0))
-    for i in range(len(x_m) - 1):
-        ax.fill_between([x_m[i], x_m[i + 1]], 0, 0.5, color=colors[i], linewidth=0)
+    for i in range(len(x_display) - 1):
+        ax.fill_between(
+            [x_display[i], x_display[i + 1]], 0, 0.5, color=colors[i], linewidth=0
+        )
 
-    ax.set_xlim(np.min(x_m), np.max(x_m))
+    ax.set_xlim(np.min(x_display), np.max(x_display))
     ax.set_ylim(0, 0.5)
     ax.axis("off")
     ax.set_title("Bending Moment Contour (MFZ)", fontsize=13, weight="bold")
@@ -273,7 +326,7 @@ def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt", run_id: str = "
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cbar = plt.colorbar(sm, ax=ax, orientation="horizontal", pad=0.25)
-    cbar.set_label("MFZ [kN·m]", fontsize=10)
+    cbar.set_label(f"MFZ [{DEFAULT_UNIT_POLICY.visualization_moment_unit}]", fontsize=10)
 
     out_path = resolve_workspace_file("mfz_contour.png", "viz", run_id or None)
     plt.savefig(out_path, dpi=220, bbox_inches="tight")
@@ -281,8 +334,8 @@ def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt", run_id: str = "
 
     return (
         f"✅ MFZ contour saved: {out_path}\n"
-        f"📊 MFZ range: {np.min(mfz_kNm):.2f} → {np.max(mfz_kNm):.2f} kN·m\n"
-        f"📏 Beam length: {beam_length:.2f} m | Nodes: {len(node_ids)}"
+        f"📊 MFZ range: {np.min(mfz_display):.2f} → {np.max(mfz_display):.2f} {DEFAULT_UNIT_POLICY.visualization_moment_unit}\n"
+        f"📏 Beam length: {beam_length:.2f} {DEFAULT_UNIT_POLICY.visualization_length_unit} | Nodes: {len(node_ids)}"
     )
 
 
@@ -468,6 +521,11 @@ def _draw_load(ax, beam_length, loads):
     for load in loads:
         if load["type"] == "point":
             Fy = load["Fy"]
+            display_force = convert_force(
+                Fy,
+                DEFAULT_UNIT_POLICY.solver_force_unit,
+                DEFAULT_UNIT_POLICY.visualization_force_unit,
+            )
             ax.arrow(
                 beam_length,
                 0.0,
@@ -483,7 +541,7 @@ def _draw_load(ax, beam_length, loads):
             ax.text(
                 beam_length - 0.05,
                 -0.35,
-                f"{Fy/1000:.1f} kN",
+                f"{display_force:.1f} {DEFAULT_UNIT_POLICY.visualization_force_unit}",
                 color="tab:red",
                 fontsize=9,
                 ha="right",
@@ -493,6 +551,11 @@ def _draw_load(ax, beam_length, loads):
 
         elif load["type"] == "uniform":
             qy = load["qy"]
+            display_force = convert_force(
+                qy,
+                DEFAULT_UNIT_POLICY.solver_force_unit,
+                DEFAULT_UNIT_POLICY.visualization_force_unit,
+            )
             n_arrows = 6
             for i in range(1, n_arrows):
                 x = beam_length * i / n_arrows
@@ -511,7 +574,7 @@ def _draw_load(ax, beam_length, loads):
             ax.text(
                 beam_length / 2,
                 -0.35,
-                f"q = {qy/1000:.1f} kN/m",
+                f"q = {display_force:.1f} {DEFAULT_UNIT_POLICY.visualization_force_unit}/{DEFAULT_UNIT_POLICY.visualization_length_unit}",
                 color="tab:red",
                 fontsize=9,
                 ha="center",
@@ -545,8 +608,11 @@ def visualize_freebody_tool(
     if beam_length_mm is None:
         beam_length_mm = 1000.0  # fallback = 1 meter
 
-    # Convert mm → m for plotting
-    beam_length = beam_length_mm / 1000.0
+    beam_length = convert_length(
+        beam_length_mm,
+        DEFAULT_UNIT_POLICY.solver_coordinate_unit,
+        DEFAULT_UNIT_POLICY.visualization_length_unit,
+    )
 
     # --- Read reactions ---
     reac_path = resolve_workspace_file(reac_name, "outputs", run_id or None)
@@ -572,12 +638,17 @@ def visualize_freebody_tool(
     # Draw reaction Fy
     Fy = reac["Fy"]
     if abs(Fy) > 1e-9:
+        fy_display = convert_force(
+            Fy,
+            DEFAULT_UNIT_POLICY.solver_force_unit,
+            DEFAULT_UNIT_POLICY.visualization_force_unit,
+        )
         _draw_vertical_arrow(
             ax,
             x=-0.05,
             y=0.0,
             magnitude=Fy,
-            label=f"Fy={Fy/1000:.1f} kN",
+            label=f"Fy={fy_display:.1f} {DEFAULT_UNIT_POLICY.visualization_force_unit}",
         )
 
     # Draw reaction moment Mz (fixed support only)
@@ -606,11 +677,15 @@ def visualize_freebody_tool(
                 length_includes_head=True,
             )
 
-            M_value = Mz / 1000.0  # convert N·mm → kN·mm
+            M_value = convert_moment(
+                Mz,
+                DEFAULT_UNIT_POLICY.solver_moment_unit,
+                DEFAULT_UNIT_POLICY.visualization_moment_unit,
+            )
             ax.text(
                 cx - r - 0.12,
                 cy + 0.02,
-                f"M = {M_value:.1f} N·mm",
+                f"M = {M_value:.1f} {DEFAULT_UNIT_POLICY.visualization_moment_unit}",
                 color="tab:blue",
                 fontsize=10,
                 va="center",
@@ -638,7 +713,7 @@ def visualize_freebody_tool(
     ax.text(
         beam_length / 2,
         arrow_y - 0.05,
-        f"L = {beam_length:.2f} m",
+        f"L = {beam_length:.2f} {DEFAULT_UNIT_POLICY.visualization_length_unit}",
         fontsize=10,
         color="gray",
         ha="center",
@@ -660,9 +735,11 @@ def visualize_freebody_tool(
     return (
         f"✅ Free-body diagram generated.\n"
         f"🖼 Image: {out_path}\n"
-        f"📏 Beam length: {beam_length:.2f} m\n"
+        f"📏 Beam length: {beam_length:.2f} {DEFAULT_UNIT_POLICY.visualization_length_unit}\n"
         f"📍 Support: {support_type}\n"
         f"🔁 Reactions at {reac['node']}: "
-        f"Fx={reac['Fx']:.2f} N, Fy={reac['Fy']:.2f} N, Mz={reac['Mz']:.2f} Nmm\n"
+        f"Fx={convert_force(reac['Fx'], DEFAULT_UNIT_POLICY.solver_force_unit, DEFAULT_UNIT_POLICY.visualization_force_unit):.2f} {DEFAULT_UNIT_POLICY.visualization_force_unit}, "
+        f"Fy={convert_force(reac['Fy'], DEFAULT_UNIT_POLICY.solver_force_unit, DEFAULT_UNIT_POLICY.visualization_force_unit):.2f} {DEFAULT_UNIT_POLICY.visualization_force_unit}, "
+        f"Mz={convert_moment(reac['Mz'], DEFAULT_UNIT_POLICY.solver_moment_unit, DEFAULT_UNIT_POLICY.visualization_moment_unit):.2f} {DEFAULT_UNIT_POLICY.visualization_moment_unit}\n"
         f"🎯 Loads: {len(loads)} found from {comm_name}"
     )
