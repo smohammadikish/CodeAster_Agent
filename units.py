@@ -86,16 +86,18 @@ def normalize_user_params(
         user_length_unit,
         policy.solver_geometry_length_unit,
     )
-    out["HY"] = convert_length(
-        float(out["HY"]),
-        user_length_unit,
-        policy.solver_geometry_length_unit,
-    )
-    out["HZ"] = convert_length(
-        float(out["HZ"]),
-        user_length_unit,
-        policy.solver_geometry_length_unit,
-    )
+    if out.get("HY") is not None:
+        out["HY"] = convert_length(
+            float(out["HY"]),
+            user_length_unit,
+            policy.solver_geometry_length_unit,
+        )
+    if out.get("HZ") is not None:
+        out["HZ"] = convert_length(
+            float(out["HZ"]),
+            user_length_unit,
+            policy.solver_geometry_length_unit,
+        )
     out["FY"] = convert_force(
         float(out["FY"]),
         user_force_unit,
@@ -122,16 +124,18 @@ def normalize_user_params_mixed_units(
         length_unit or policy.user_length_unit,
         policy.solver_geometry_length_unit,
     )
-    out["HY"] = convert_length(
-        float(out["HY"]),
-        hy_unit or policy.user_length_unit,
-        policy.solver_geometry_length_unit,
-    )
-    out["HZ"] = convert_length(
-        float(out["HZ"]),
-        hz_unit or policy.user_length_unit,
-        policy.solver_geometry_length_unit,
-    )
+    if out.get("HY") is not None:
+        out["HY"] = convert_length(
+            float(out["HY"]),
+            hy_unit or policy.user_length_unit,
+            policy.solver_geometry_length_unit,
+        )
+    if out.get("HZ") is not None:
+        out["HZ"] = convert_length(
+            float(out["HZ"]),
+            hz_unit or policy.user_length_unit,
+            policy.solver_geometry_length_unit,
+        )
     out["FY"] = convert_force(
         float(out["FY"]),
         force_unit or policy.user_force_unit,

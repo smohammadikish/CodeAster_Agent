@@ -6,6 +6,7 @@ import os
 
 from langchain_core.tools import tool
 
+from library.section_calculators import rectangular_section
 from storage import resolve_workspace_file
 
 
@@ -45,15 +46,15 @@ mater = AFFE_MATERIAU(
   AFFE=_F(GROUP_MA=('BEAM',), MATER=mat)
 );
 
-# __________ Define beam section geometry (rectangular, mm) ________
+# __________ Define beam section geometry (GENERALE, mm) ________
 cara = AFFE_CARA_ELEM(
-  MODELE=model,
-  POUTRE=_F(
-    GROUP_MA=('BEAM',),
-    SECTION='RECTANGLE',
-    CARA=('HY','HZ'),
-    VALE=({HY_mm}, {HZ_mm})
-  )
+    MODELE=model,
+    POUTRE=_F(
+        GROUP_MA=('BEAM',),
+        SECTION='GENERALE',
+        CARA=('A','IY','IZ','JX','AY','AZ'),
+        VALE=({A}, {IY}, {IZ}, {JX}, {AY}, {AZ}),
+    ),
 );
 
 # __________________ Boundary condition (BASE) _________________
@@ -167,6 +168,12 @@ def generate_comm_tool(
     E: float = 210e9,
     NU: float = 0.3,
     RHO: float = 7850.0,
+    A_mm2: float | None = None,
+    IY_mm4: float | None = None,
+    IZ_mm4: float | None = None,
+    JX_mm4: float | None = None,
+    AY_mm2: float | None = None,
+    AZ_mm2: float | None = None,
     HY_mm: float = 120.0,
     HZ_mm: float = 100.0,
     FY_N: float = -1500.0,
@@ -176,7 +183,8 @@ def generate_comm_tool(
     Generate a Code_Aster .comm file.
 
     IMPORTANT:
-    - HY_mm, HZ_mm must be in millimeters (mm)
+    - Preferred section inputs are A_mm2, IY_mm4, IZ_mm4, JX_mm4, AY_mm2, AZ_mm2
+    - HY_mm and HZ_mm are a compatibility fallback for a solid rectangle
     - FY_N is the load in Newtons
     """
 
@@ -184,18 +192,31 @@ def generate_comm_tool(
     comm_path = resolve_workspace_file(comm_name, "inputs", run_id or None)
 
     if not os.path.exists(med_path):
-        return f"âŒ Error: mesh file '{med_path}' not found."
+        return f"Error: mesh file '{med_path}' not found."
+
+    if None in {A_mm2, IY_mm4, IZ_mm4, JX_mm4, AY_mm2, AZ_mm2}:
+        section = rectangular_section(HZ_mm, HY_mm)
+        A_mm2 = float(section["A"])
+        IY_mm4 = float(section["Iy"])
+        IZ_mm4 = float(section["Iz"])
+        JX_mm4 = float(section["IT"])
+        AY_mm2 = float(section["Avy"])
+        AZ_mm2 = float(section["Avz"])
 
     content = COMM_TEMPLATE.format(
         E=E,
         NU=NU,
         RHO=RHO,
-        HY_mm=HY_mm,
-        HZ_mm=HZ_mm,
+        A=A_mm2,
+        IY=IY_mm4,
+        IZ=IZ_mm4,
+        JX=JX_mm4,
+        AY=AY_mm2,
+        AZ=AZ_mm2,
         FY_N=FY_N,
     )
 
     with open(comm_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    return f"âœ… Generated {comm_name} successfully."
+    return f"Generated {comm_name} successfully."

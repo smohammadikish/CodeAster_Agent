@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 from input_parser import (ParameterSheet, build_parser_hint,
                           build_state_aware_input, parse_beam_request,
-                          validate_state_update)
+                          resolve_analysis_inputs, validate_state_update)
 
 
 class InputParserTests(unittest.TestCase):
@@ -54,7 +54,6 @@ class InputParserTests(unittest.TestCase):
 
         self.assertIn('"length_m": 5.0', first)
         self.assertIn('"material_hint": "c30 concrete"', first)
-        self.assertIn('"E": 30000000000.0', first)
         self.assertIn('"length_m": 5.0', second)
         self.assertIn('"n_elems": 10', second)
         self.assertIn('"HY": 20.0', second)
@@ -76,7 +75,7 @@ class InputParserTests(unittest.TestCase):
         self.assertIn("- Beam length: 5.0", summary)
         self.assertIn("- Length unit: m", summary)
         self.assertIn("- Elements: 10", summary)
-        self.assertIn("Missing required fields: E, NU, RHO, HY, HZ, FY", summary)
+        self.assertIn("Missing required fields: FY, E, NU, RHO, section_definition", summary)
 
     def test_validate_and_merge_llm_state_update(self) -> None:
         payload = validate_state_update(
@@ -106,6 +105,19 @@ class InputParserTests(unittest.TestCase):
         build_state_aware_input(".225 m is hight", sheet, llm=llm)
         self.assertEqual(sheet.to_dict()["HY"], 0.225)
         self.assertEqual(sheet.to_dict()["hy_unit"], "m")
+
+    def test_resolution_returns_shear_areas_for_named_section(self) -> None:
+        resolved = resolve_analysis_inputs(
+            {
+                "length_m": 5.0,
+                "n_elems": 10,
+                "FY": -1000.0,
+                "material_hint": "s355",
+                "section_hint": "ipe 200",
+            }
+        )["resolved"]
+        self.assertIsNotNone(resolved["AY_mm2"])
+        self.assertIsNotNone(resolved["AZ_mm2"])
 
 
 if __name__ == "__main__":

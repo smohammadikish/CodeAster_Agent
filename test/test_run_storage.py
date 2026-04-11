@@ -42,8 +42,12 @@ class RunStorageTests(unittest.TestCase):
                 "E": 210e9,
                 "NU": 0.3,
                 "RHO": 7850.0,
-                "HY_mm": 120.0,
-                "HZ_mm": 100.0,
+                "A_mm2": 12000.0,
+                "IY_mm4": 14400000.0,
+                "IZ_mm4": 10000000.0,
+                "JX_mm4": 5000000.0,
+                "AY_mm2": 10000.0,
+                "AZ_mm2": 9000.0,
                 "FY_N": -1500.0,
                 "run_id": self.run_id,
             }
@@ -65,6 +69,11 @@ class RunStorageTests(unittest.TestCase):
         self.assertTrue((self.paths.inputs / "model.med").exists())
         self.assertTrue((self.paths.inputs / "model.comm").exists())
         self.assertTrue((self.paths.inputs / "model.export").exists())
+
+        comm_text = (self.paths.inputs / "model.comm").read_text(encoding="utf-8")
+        self.assertIn("SECTION='GENERALE'", comm_text)
+        self.assertIn("CARA=('A','IY','IZ','JX','AY','AZ')", comm_text)
+        self.assertIn("VALE=(12000.0, 14400000.0, 10000000.0, 5000000.0, 10000.0, 9000.0)", comm_text)
 
         export_text = (self.paths.inputs / "model.export").read_text(encoding="utf-8")
         self.assertIn(str((self.paths.inputs / "model.med").resolve()), export_text)

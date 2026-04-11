@@ -1,0 +1,95 @@
+{
+  "materials": {
+    "steel": {
+      "source_type": "csv",
+      "source_file": "materials/steel_Eurocode(EN1993).csv",
+      "reference": "Eurocode EN 1993",
+      "key_field": "steel type",
+      "aliases": ["steel", "structural steel"],
+      "output_units": {
+        "E": "Pa",
+        "FY": "Pa",
+        "NU": "-",
+        "RHO": "kg/m3"
+      }
+    },
+    "aluminum": {
+      "source_type": "csv",
+      "source_file": "materials/aluminum_Eurocode(EN1999).csv",
+      "reference": "Eurocode EN 1999",
+      "key_field": "Alloy",
+      "aliases": ["aluminum", "aluminium", "aluminum alloy", "aluminium alloy"],
+      "output_units": {
+        "E": "Pa",
+        "NU": "-",
+        "RHO": "kg/m3"
+      }
+    },
+    "concrete": {
+      "source_type": "csv+formula",
+      "source_file": "materials/concrete_Eurocode.csv",
+      "reference": "Eurocode EN 1992",
+      "key_field": "class",
+      "aliases": ["concrete", "reinforced concrete", "rc"],
+      "fixed_properties": {
+        "NU": 0.2,
+        "RHO": 2400.0
+      },
+      "output_units": {
+        "E": "Pa",
+        "NU": "-",
+        "RHO": "kg/m3",
+        "FCK": "Pa",
+        "FCM": "Pa"
+      }
+    },
+    "wood": {
+      "source_type": "csv",
+      "source_file": "materials/timber_Eurocode.csv",
+      "reference": "Eurocode EN 1995",
+      "key_field": "class",
+      "aliases": ["wood", "timber", "glulam"],
+      "output_units": {
+        "E": "Pa",
+        "NU": "-",
+        "RHO": "kg/m3"
+      }
+    }
+  },
+  "sections": {
+    "steel": {
+      "source_type": "csv",
+      "source_file": "sections/steel/Steelprofiles.csv",
+      "reference": "Eurocode steel profile table",
+      "key_field": "Profile",
+      "aliases": ["steel"]
+    },
+    "aluminum": {
+      "source_type": "csv",
+      "source_file": "sections/aluminum/aluminum_halow.csv",
+      "reference": "Eurocode EN 1999 aluminum section table",
+      "key_field": "Profile",
+      "aliases": ["aluminum", "aluminium"]
+    },
+    "concrete": {
+      "source_type": "csv",
+      "source_file": "sections/concrete/ReinfocedConcreteSectios_.csv",
+      "reference": "User concrete section catalog",
+      "key_field": "Section",
+      "aliases": ["concrete", "reinforced concrete", "rc"]
+    },
+    "wood": {
+      "source_type": "csv",
+      "source_file": "sections/timber/timber.csv",
+      "reference": "User timber section catalog",
+      "key_field": "Profile",
+      "aliases": ["wood", "timber"]
+    },
+    "parametric": {
+      "source_type": "generated",
+      "reference": "Parametric section formulas",
+      "aliases": ["parametric", "simple", "generated"],
+      "shapes": ["rectangle", "rectangular", "circle", "circular"]
+    }
+  }
+}

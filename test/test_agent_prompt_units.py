@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
-from main_agent import (build_confirmation_summary, build_pipeline_kwargs_from_sheet,
+from main_agent import (build_agent, build_confirmation_summary, build_pipeline_kwargs_from_sheet,
                         build_post_run_idle_message,
                         build_post_run_message, build_post_success_message,
                         build_system_prompt, get_sheet_signature,
@@ -13,12 +13,24 @@ from input_parser import ParameterSheet, build_state_aware_input
 class AgentPromptUnitTests(unittest.TestCase):
     def test_system_prompt_accepts_mixed_user_units(self) -> None:
         prompt = build_system_prompt()
-        self.assertIn("You MUST accept explicit user units and convert them internally.", prompt)
-        self.assertIn("Do NOT ask the user to manually convert", prompt)
+        self.assertIn("You must accept explicit user units and convert them internally.", prompt)
+        self.assertIn("Do not ask the user to manually convert", prompt)
         self.assertIn("length_unit", prompt)
         self.assertIn("hy_unit", prompt)
         self.assertIn("hz_unit", prompt)
         self.assertIn("force_unit", prompt)
+        self.assertIn("Use list_material_catalog for material lists.", prompt)
+        self.assertIn("Catalog sections return Code_Aster-ready values A, IY, IZ, JX, AY, and AZ.", prompt)
+
+    def test_build_agent_exposes_catalog_and_pipeline_tools(self) -> None:
+        agent = build_agent()
+        tool_names = {tool.name for tool in agent.tools}
+        self.assertIn("list_material_catalog", tool_names)
+        self.assertIn("get_material_catalog", tool_names)
+        self.assertIn("list_section_catalog", tool_names)
+        self.assertIn("get_section_catalog", tool_names)
+        self.assertIn("build_parametric_section_catalog", tool_names)
+        self.assertIn("run_full_pipeline", tool_names)
 
     def test_run_full_pipeline_accepts_per_parameter_units(self) -> None:
         result = run_full_pipeline.invoke(
@@ -69,9 +81,13 @@ class AgentPromptUnitTests(unittest.TestCase):
         self.assertEqual(kwargs["hy_unit"], "cm")
         self.assertEqual(kwargs["hz_unit"], "cm")
         self.assertEqual(kwargs["force_unit"], "kN")
-        self.assertEqual(kwargs["E"], 30e9)
+        self.assertEqual(kwargs["E"], 33e9)
         self.assertTrue(kwargs["confirm"])
+        self.assertIn("AY_mm2", kwargs)
+        self.assertIn("AZ_mm2", kwargs)
         self.assertIn("All required parameters are available.", summary)
+        self.assertIn("- AY:", summary)
+        self.assertIn("- AZ:", summary)
         self.assertIn("Reply with 'yes', 'confirm', or 'run it'", summary)
 
     def test_exit_detection_handles_farewell_phrases(self) -> None:

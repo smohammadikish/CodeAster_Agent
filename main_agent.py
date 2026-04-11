@@ -26,10 +26,16 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
 from env_loader import load_env  # noqa: E402
-from input_parser import ParameterSheet, build_state_aware_input, parse_beam_request
+from input_parser import (ParameterSheet, build_state_aware_input,
+                          parse_beam_request, resolve_analysis_inputs)
 from storage import (create_run_id, ensure_base_dirs, ensure_run_dirs,
                      finalize_run, record_artifact, record_tool_event,
                      register_run, resolve_workspace_file, utc_now_iso)
+from tools.catalog_tools import (build_parametric_section_catalog_tool,
+                                 get_material_catalog_tool,
+                                 get_section_catalog_tool,
+                                 list_material_catalog_tool,
+                                 list_section_catalog_tool)
 from tools.comm_generator import generate_comm_tool
 from tools.export_generator import generate_export_tool
 from tools.geo_generator import generate_geo_tool
@@ -70,6 +76,12 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     "RHO": 7850.0,  # kg/m^3
     "HY": 0.12,  # m
     "HZ": 0.10,  # m
+    "A_mm2": None,
+    "IY_mm4": None,
+    "IZ_mm4": None,
+    "JX_mm4": None,
+    "AY_mm2": None,
+    "AZ_mm2": None,
     "FY": -1500.0,  # N (negative = downward)
 }
 DEFAULT_INPUT_LENGTH_UNIT = DEFAULT_UNIT_POLICY.user_length_unit
@@ -258,9 +270,11 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     p = dict(params)
 
     # Convert geometric dimensions from meters to millimeters
-    p["length_m"] = p["length_m"] * 1000.0  # m → mm
-    p["HY"] = p["HY"] * 1000.0  # m → mm
-    p["HZ"] = p["HZ"] * 1000.0  # m → mm
+    p["length_m"] = p["length_m"] * 1000.0
+    if p.get("HY") is not None:
+        p["HY"] = p["HY"] * 1000.0
+    if p.get("HZ") is not None:
+        p["HZ"] = p["HZ"] * 1000.0
 
     # Ensure load FY is negative (downward) unless user explicitly gave negative
     if p["FY"] > 0:
@@ -275,7 +289,10 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     # -------------------------------------------------
     if not safe_call(
         generate_geo_tool,
-        os.path.join(WORKSPACE, "model.geo"),
+        "",
+        expected_artifacts=[
+            ("geo", "workspace", resolve_workspace_file("model.geo", "inputs"))
+        ],
         length_mm=p["length_m"],  # NOTE: now explicitly mm
         n_elems=p["n_elems"],
         geo_name="model.geo",
@@ -287,7 +304,10 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     # -------------------------------------------------
     if not safe_call(
         mesh_with_gmsh_tool,
-        os.path.join(WORKSPACE, "model.med"),
+        "",
+        expected_artifacts=[
+            ("med", "workspace", resolve_workspace_file("model.med", "inputs"))
+        ],
         geo_name="model.geo",
         med_name="model.med",
     ):
@@ -298,14 +318,23 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     # -------------------------------------------------
     if not safe_call(
         generate_comm_tool,
-        os.path.join(WORKSPACE, "model.comm"),
+        "",
+        expected_artifacts=[
+            ("comm", "workspace", resolve_workspace_file("model.comm", "inputs"))
+        ],
         med_name="model.med",
         comm_name="model.comm",
         E=p["E"],
         NU=p["NU"],
         RHO=p["RHO"],
-        HY_mm=p["HY"],  # mm
-        HZ_mm=p["HZ"],  # mm
+        A_mm2=p.get("A_mm2"),
+        IY_mm4=p.get("IY_mm4"),
+        IZ_mm4=p.get("IZ_mm4"),
+        JX_mm4=p.get("JX_mm4"),
+        AY_mm2=p.get("AY_mm2"),
+        AZ_mm2=p.get("AZ_mm2"),
+        HY_mm=p.get("HY", 120.0),
+        HZ_mm=p.get("HZ", 100.0),
         FY_N=p["FY"],
     ):
         return "Failed in generate_comm_tool"
@@ -315,7 +344,10 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     # -------------------------------------------------
     if not safe_call(
         generate_export_tool,
-        os.path.join(WORKSPACE, "model.export"),
+        "",
+        expected_artifacts=[
+            ("export", "workspace", resolve_workspace_file("model.export", "inputs"))
+        ],
         comm_name="model.comm",
         export_name="model.export",
         job_name="beam_job",
@@ -328,7 +360,15 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     # -------------------------------------------------
     if not safe_call(
         run_code_aster_tool,
-        os.path.join(WORKSPACE, "beam_job.mess"),
+        "",
+        expected_artifacts=[
+            ("mess", "workspace", resolve_workspace_file("beam_job.mess", "outputs")),
+            ("resu", "workspace", resolve_workspace_file("beam_job.resu", "outputs")),
+            ("tab_reac", "workspace", resolve_workspace_file("tab_reac.txt", "outputs")),
+            ("tab_disp", "workspace", resolve_workspace_file("tab_disp.txt", "outputs")),
+            ("local_axes", "workspace", resolve_workspace_file("local_axes.txt", "outputs")),
+            ("tab_sie", "workspace", resolve_workspace_file("tab_sie.txt", "outputs")),
+        ],
         export_name="model.export",
     ):
         return "Failed in run_code_aster_tool"
@@ -341,28 +381,42 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
 
     if not safe_call(
         visualize_resu_tool,
-        os.path.join(WORKSPACE, "beam_job.resu"),
+        "",
+        expected_artifacts=[
+            ("deflection_plot", "workspace", resolve_workspace_file("beam_job_def.png", "viz")),
+            ("rotation_plot", "workspace", resolve_workspace_file("beam_job_rot.png", "viz")),
+        ],
         resu_name="beam_job.resu",
     ):
         visualization_failures.append("visualize_resu_tool")
 
     if not safe_call(
         visualize_stress_tool,
-        os.path.join(WORKSPACE, "tab_sie.txt"),
+        "",
+        expected_artifacts=[
+            ("shear_plot", "workspace", resolve_workspace_file("shear_diagram.png", "viz")),
+            ("moment_plot", "workspace", resolve_workspace_file("moment_diagram.png", "viz")),
+        ],
         stress_name="tab_sie.txt",
     ):
         visualization_failures.append("visualize_stress_tool")
 
     if not safe_call(
         visualize_mfz_contour_tool,
-        os.path.join(WORKSPACE, "tab_sie.txt"),
+        "",
+        expected_artifacts=[
+            ("mfz_contour", "workspace", resolve_workspace_file("mfz_contour.png", "viz"))
+        ],
         stress_name="tab_sie.txt",
     ):
         visualization_failures.append("visualize_mfz_contour_tool")
 
     if not safe_call(
         visualize_freebody_tool,
-        os.path.join(WORKSPACE, "tab_reac.txt"),
+        "",
+        expected_artifacts=[
+            ("freebody_plot", "workspace", resolve_workspace_file("freebody.png", "viz"))
+        ],
         reac_name="tab_reac.txt",
     ):
         visualization_failures.append("visualize_freebody_tool")
@@ -466,8 +520,14 @@ def run_hybrid_pipeline_with_run_storage(
             E=p["E"],
             NU=p["NU"],
             RHO=p["RHO"],
-            HY_mm=p["HY"],
-            HZ_mm=p["HZ"],
+            A_mm2=p.get("A_mm2"),
+            IY_mm4=p.get("IY_mm4"),
+            IZ_mm4=p.get("IZ_mm4"),
+            JX_mm4=p.get("JX_mm4"),
+            AY_mm2=p.get("AY_mm2"),
+            AZ_mm2=p.get("AZ_mm2"),
+            HY_mm=p.get("HY", 120.0),
+            HZ_mm=p.get("HZ", 100.0),
             FY_N=p["FY"],
         ):
             finalize_run(run_id, "failed", "Failed in generate_comm_tool")
@@ -592,6 +652,12 @@ def run_full_pipeline(
     RHO: float = None,
     HY: float = None,
     HZ: float = None,
+    A_mm2: float = None,
+    IY_mm4: float = None,
+    IZ_mm4: float = None,
+    JX_mm4: float = None,
+    AY_mm2: float = None,
+    AZ_mm2: float = None,
     FY: float = None,
     length_unit: str = DEFAULT_INPUT_LENGTH_UNIT,
     hy_unit: str = DEFAULT_INPUT_LENGTH_UNIT,
@@ -604,8 +670,8 @@ def run_full_pipeline(
 
     IMPORTANT UNITS (FOR THE USER / LLM SIDE):
     - length_m: beam length in `length_unit`
-    - HY: section height in `hy_unit`
-    - HZ: section width in `hz_unit`
+    - HY/HZ: optional rectangular dimensions in `hy_unit`/`hz_unit`
+    - A_mm2/IY_mm4/IZ_mm4/JX_mm4/AY_mm2/AZ_mm2: preferred section properties for Code_Aster
     - FY: load in `force_unit`, positive or negative
     - E: Young's modulus [Pa]
     - NU: Poisson ratio [-]
@@ -628,6 +694,12 @@ def run_full_pipeline(
         "RHO": RHO,
         "HY": HY,
         "HZ": HZ,
+        "A_mm2": A_mm2,
+        "IY_mm4": IY_mm4,
+        "IZ_mm4": IZ_mm4,
+        "JX_mm4": JX_mm4,
+        "AY_mm2": AY_mm2,
+        "AZ_mm2": AZ_mm2,
         "FY": FY,
         "length_unit": length_unit,
         "hy_unit": hy_unit,
@@ -638,8 +710,14 @@ def run_full_pipeline(
     missing = [
         name
         for name, val in params_raw.items()
-        if name not in {"length_unit", "hy_unit", "hz_unit", "force_unit"} and val is None
+        if name not in {"length_unit", "hy_unit", "hz_unit", "force_unit", "HY", "HZ", "A_mm2", "IY_mm4", "IZ_mm4", "JX_mm4", "AY_mm2", "AZ_mm2"} and val is None
     ]
+    has_section = (
+        all(value is not None for value in (A_mm2, IY_mm4, IZ_mm4, JX_mm4, AY_mm2, AZ_mm2))
+        or (HY is not None and HZ is not None)
+    )
+    if not has_section:
+        missing.append("section_definition")
 
     if missing:
         return (
@@ -666,6 +744,12 @@ def run_full_pipeline(
             "RHO": RHO,
             "HY": HY,
             "HZ": HZ,
+            "A_mm2": A_mm2,
+            "IY_mm4": IY_mm4,
+            "IZ_mm4": IZ_mm4,
+            "JX_mm4": JX_mm4,
+            "AY_mm2": AY_mm2,
+            "AZ_mm2": AZ_mm2,
             "FY": FY,
         }
     )
@@ -696,77 +780,102 @@ def run_full_pipeline(
 
 
 def build_system_prompt() -> str:
-    return (
-        "You are a mechanical simulation assistant specialized in beam analysis "
-        "using Code_Aster and Gmsh. You support multi-step conversations where "
-        "the user incrementally provides beam geometry, material properties, "
-        "cross-section dimensions, and loads.\n\n"
-        "============================================================\n"
-        "UNITS CONVENTION (CRITICAL)\n"
-        "============================================================\n"
-        "- The user may provide mixed units such as m, cm, mm, N, or kN.\n"
-        "- You MUST accept explicit user units and convert them internally.\n"
-        "- Do NOT ask the user to manually convert 20 cm to 0.20 m or 1.2 kN to 1200 N.\n"
-        "- Keep every numeric value together with its own unit while collecting data.\n"
-        "- If the user says '5 m long, 20 cm high, 12 cm wide, 1.2 kN load', treat that as valid.\n"
-        "- Only ask follow-up questions when a value is missing or a unit is absent and ambiguous.\n\n"
-        "============================================================\n"
-        "BEHAVIOR RULES — FOLLOW THESE STRICTLY\n"
-        "============================================================\n\n"
-        "1) DO NOT call any tools until ALL required parameters are known:\n"
-        "   - length_m  (beam length)\n"
-        "   - n_elems   (integer)\n"
-        "   - E         (Young's modulus)\n"
-        "   - NU        (Poisson ratio)\n"
-        "   - RHO       (density)\n"
-        "   - HY        (cross-section height)\n"
-        "   - HZ        (cross-section width)\n"
-        "   - FY        (load)\n\n"
-        "2) When calling run_full_pipeline, pass units explicitly per field:\n"
-        "   - length_unit for length_m\n"
-        "   - hy_unit for HY\n"
-        "   - hz_unit for HZ\n"
-        "   - force_unit for FY\n"
-        "   Allowed length units: m, cm, mm. Allowed force units: N, kN.\n\n"
-        "3) If ANY required value is missing:\n"
-        "   → Ask follow-up questions.\n"
-        "   → DO NOT assume defaults unless the user explicitly says: 'Use default values'.\n\n"
-        "4) When the user does not know material properties (E, NU, RHO):\n"
-        "   → Do NOT call any tools.\n"
-        "   → Offer common approximate engineering values for steel, aluminum, or concrete.\n"
-        "   → Clearly label them as suggested defaults and ask the user to confirm one set.\n\n"
-        "5) When ALL parameters are known:\n"
-        "   → Summarize them clearly and preserve the user's units.\n"
-        "   → THEN ask:\n"
-        '       "Do you confirm running the simulation with these values?"\n'
-        "   → NEVER call run_full_pipeline unless the user explicitly confirms with:\n"
-        "       'yes', 'confirm', 'ok run', or similar.\n\n"
-        "6) If the user responds with 'no' or 'not yet':\n"
-        "   → DO NOT call any tools.\n"
-        "   → Ask what they want to modify.\n\n"
-        "7) FINALIZATION / STOP RULES:\n"
-        "   If the user says ANY of these in the conversation:\n"
-        "       'stop', 'finish', 'end', 'cancel', 'no more', 'terminate', 'that's enough', 'done'\n"
-        "   → Immediately stop all simulation workflow.\n"
-        "   → DO NOT call any tools.\n"
-        "   → Simply acknowledge and wait for the next input (or let the CLI handle exit).\n"
-        "   → Never restart the simulation pipeline unless the user explicitly asks.\n\n"
-        "8) NEVER rerun run_full_pipeline automatically.\n"
-        "   → A simulation may run only once per explicit confirmation.\n"
-        "   → Never repeat runs after the user says it is finished.\n\n"
-        "9) If the user gives a geometry number without an explicit unit "
-        "(for example 'hy 20' or 'hz 10'):\n"
-        "   → Treat it as ambiguous.\n"
-        "   → Ask the user to restate that dimension with units.\n"
-        "   → Never guess whether it means m, cm, or mm.\n\n"
-        "10) Maintain conversation memory and be conversational and helpful, but "
-        "follow ALL rules above with 100% strictness.\n\n"
-        "============================================================\n"
-        "YOUR GOAL\n"
-        "============================================================\n"
-        "Guide the user step-by-step, help determine missing values, ensure explicit "
-        "confirmation before executing any tools, and respect all stop commands."
-    )
+    return """You are a mechanical simulation assistant specialized in beam analysis using Code_Aster and Gmsh. You support multi-step conversations where the user incrementally provides beam geometry, material properties, cross-section definitions, and loads.
+
+============================================================
+UNITS CONVENTION (CRITICAL)
+============================================================
+- The user may provide mixed units such as m, cm, mm, N, or kN.
+- You must accept explicit user units and convert them internally.
+- Do not ask the user to manually convert 20 cm to 0.20 m or 1.2 kN to 1200 N.
+- Keep every numeric value together with its own unit while collecting data.
+- If the user says '5 m long, 20 cm high, 12 cm wide, 1.2 kN load', treat that as valid.
+- If the user gives a named material or a named section from the catalog, prefer resolving it instead of asking for raw properties.
+- Only ask follow-up questions when a value is missing or a unit is absent and ambiguous.
+
+============================================================
+CATALOG CAPABILITIES
+============================================================
+- Material families in the catalog: steel, aluminum, concrete, wood.
+- Section families in the catalog: steel, aluminum, concrete, wood.
+- Parametric sections are available for rectangle and circle.
+- Catalog materials return solver-ready values such as E, NU, and RHO.
+- Catalog sections return Code_Aster-ready values A, IY, IZ, JX, AY, and AZ.
+- Concrete can use a formula fallback when the exact class is not listed.
+
+============================================================
+BEHAVIOR RULES - FOLLOW THESE STRICTLY
+============================================================
+
+1) Use catalog tools when the user asks for available materials, available sections, or named catalog items.
+   - Use list_material_catalog for material lists.
+   - Use get_material_catalog for one named material.
+   - Use list_section_catalog for section lists.
+   - Use get_section_catalog for one named section.
+   - Use build_parametric_section_catalog for simple rectangle or circle sections.
+   - Never invent catalog contents from memory.
+
+2) Do not call run_full_pipeline until all required parameters are known:
+   - length_m  (beam length)
+   - n_elems   (integer)
+   - E, NU, RHO or a resolvable material name
+   - A, IY, IZ, JX, AY, AZ or a resolvable section definition
+   - FY        (load)
+
+3) When calling run_full_pipeline, pass units explicitly per field:
+   - length_unit for length_m
+   - hy_unit for HY
+   - hz_unit for HZ
+   - force_unit for FY
+   Allowed length units: m, cm, mm. Allowed force units: N, kN.
+
+4) If any required value is missing:
+   - Ask follow-up questions.
+   - Do not assume defaults unless the user explicitly says 'Use default values'.
+
+5) When the user gives a known material or section name:
+   - Prefer the internal catalog and formulas to resolve properties.
+   - Use Eurocode references for catalog materials.
+   - For concrete grades not in the table, use the formula fallback.
+
+6) When the user does not know material properties and no catalog match exists:
+   - Do not call run_full_pipeline.
+   - Ask for either a valid catalog material or explicit values for E, NU, and RHO.
+
+7) When all parameters are known:
+   - Summarize them clearly and preserve the user's units.
+   - Then ask:
+       "Do you confirm running the simulation with these values?"
+   - Never call run_full_pipeline unless the user explicitly confirms with:
+       'yes', 'confirm', 'ok run', or similar.
+
+8) If the user responds with 'no' or 'not yet':
+   - Do not call any tools.
+   - Ask what they want to modify.
+
+9) FINALIZATION / STOP RULES:
+   If the user says any of these in the conversation:
+       'stop', 'finish', 'end', 'cancel', 'no more', 'terminate', "that's enough", 'done'
+   - Immediately stop all simulation workflow.
+   - Do not call any tools.
+   - Simply acknowledge and wait for the next input (or let the CLI handle exit).
+   - Never restart the simulation pipeline unless the user explicitly asks.
+
+10) Never rerun run_full_pipeline automatically.
+   - A simulation may run only once per explicit confirmation.
+   - Never repeat runs after the user says it is finished.
+
+11) If the user gives a geometry number without an explicit unit (for example 'hy 20' or 'hz 10'):
+   - Treat it as ambiguous.
+   - Ask the user to restate that dimension with units.
+   - Never guess whether it means m, cm, or mm.
+
+12) Maintain conversation memory and be conversational and helpful, but follow all rules above with 100% strictness.
+
+============================================================
+YOUR GOAL
+============================================================
+Guide the user step-by-step, help determine missing values, ensure explicit confirmation before executing any tools, and respect all stop commands."""
 
 
 def is_confirmation_input(user_input: str) -> bool:
@@ -818,32 +927,73 @@ def get_sheet_signature(sheet: ParameterSheet) -> str:
 
 
 def build_confirmation_summary(sheet: ParameterSheet) -> str:
-    values = sheet.to_dict()
-    return (
-        "All required parameters are available.\n"
-        "Current values:\n"
-        f"- Length: {values['length_m']} {values.get('length_unit', DEFAULT_INPUT_LENGTH_UNIT)}\n"
-        f"- Elements: {values['n_elems']}\n"
-        f"- HY: {values['HY']} {values.get('hy_unit', DEFAULT_INPUT_LENGTH_UNIT)}\n"
-        f"- HZ: {values['HZ']} {values.get('hz_unit', DEFAULT_INPUT_LENGTH_UNIT)}\n"
-        f"- FY: {values['FY']} {values.get('force_unit', DEFAULT_INPUT_FORCE_UNIT)}\n"
-        f"- E: {values['E']}\n"
-        f"- NU: {values['NU']}\n"
-        f"- RHO: {values['RHO']}\n"
-        "Reply with 'yes', 'confirm', or 'run it' to start the simulation."
+    resolution = resolve_analysis_inputs(sheet.to_dict())
+    values = resolution["resolved"]
+    material = values.get("resolved_material")
+    section = values.get("resolved_section")
+    material_line = (
+        f"- Material: {material.get('name')} ({material.get('reference')})\n"
+        if material
+        else ""
     )
+    section_name = section.get("Profile") or section.get("Section") or section.get("shape") if section else None
+    section_ref = section.get("reference") if section else None
+    section_line = (
+        f"- Section: {section_name} ({section_ref})\n"
+        if section_name
+        else ""
+    )
+    note_line = (
+        "Notes:\n- " + "\n- ".join(resolution["notes"]) + "\n"
+        if resolution["notes"]
+        else ""
+    )
+    lines = [
+        "All required parameters are available.",
+        "Current values:",
+        f"- Length: {values['length_m']} {values.get('length_unit', DEFAULT_INPUT_LENGTH_UNIT)}",
+        f"- Elements: {values['n_elems']}",
+        f"- FY: {values['FY']} {values.get('force_unit', DEFAULT_INPUT_FORCE_UNIT)}",
+    ]
+    if material_line:
+        lines.append(material_line.strip())
+    if section_line:
+        lines.append(section_line.strip())
+    lines.extend(
+        [
+            f"- E: {values['E']}",
+            f"- NU: {values['NU']}",
+            f"- RHO: {values['RHO']}",
+            f"- A: {values['A_mm2']} mm^2",
+            f"- IY: {values['IY_mm4']} mm^4",
+            f"- IZ: {values['IZ_mm4']} mm^4",
+            f"- JX: {values['JX_mm4']} mm^4",
+            f"- AY: {values['AY_mm2']} mm^2",
+            f"- AZ: {values['AZ_mm2']} mm^2",
+        ]
+    )
+    if note_line:
+        lines.append(note_line.strip())
+    lines.append("Reply with 'yes', 'confirm', or 'run it' to start the simulation.")
+    return "\n".join(lines)
 
 
 def build_pipeline_kwargs_from_sheet(sheet: ParameterSheet) -> dict[str, Any]:
-    values = sheet.to_dict()
+    values = resolve_analysis_inputs(sheet.to_dict())["resolved"]
     return {
         "length_m": values["length_m"],
         "n_elems": values["n_elems"],
         "E": values["E"],
         "NU": values["NU"],
         "RHO": values["RHO"],
-        "HY": values["HY"],
-        "HZ": values["HZ"],
+        "HY": values.get("HY"),
+        "HZ": values.get("HZ"),
+        "A_mm2": values["A_mm2"],
+        "IY_mm4": values["IY_mm4"],
+        "IZ_mm4": values["IZ_mm4"],
+        "JX_mm4": values["JX_mm4"],
+        "AY_mm2": values["AY_mm2"],
+        "AZ_mm2": values["AZ_mm2"],
         "FY": values["FY"],
         "length_unit": values.get("length_unit", DEFAULT_INPUT_LENGTH_UNIT),
         "hy_unit": values.get("hy_unit", DEFAULT_INPUT_LENGTH_UNIT),
@@ -869,8 +1019,14 @@ def build_agent() -> AgentExecutor:
         max_tokens=800,
     )
 
-    # Expose only the guarded high-level pipeline tool to the agent.
+    # Expose catalog-assistance tools and keep final execution behind the
+    # guarded high-level pipeline tool.
     tools = [
+        list_material_catalog_tool,
+        get_material_catalog_tool,
+        list_section_catalog_tool,
+        get_section_catalog_tool,
+        build_parametric_section_catalog_tool,
         run_full_pipeline,  # High-level pipeline tool
     ]
 

@@ -72,13 +72,10 @@ Use `--mode chat` for the best experience. A good test conversation is:
 
 ```text
 You: simulate a 4 m beam with 25 elements and 2000 N tip load
-Agent: asks for missing material and section values
+Agent: asks for missing material and section values or suggests using the catalog
 
-You: use C35 concrete
-Agent: suggests approximate material values and asks for HY and HZ
-
-You: HY=0.20 m, HZ=0.10 m
-Agent: summarizes all parameters and asks for confirmation
+You: use C35/45 concrete and IPE200
+Agent: resolves the material and section from the catalog, summarizes E/NU/RHO and A/IY/IZ/JX/AY/AZ, and asks for confirmation
 
 You: yes
 Agent: runs the full simulation
@@ -90,11 +87,37 @@ Another valid full input set:
 simulate a 4 m beam with 25 elements, E=30e9 Pa, NU=0.2, RHO=2400 kg/m3, HY=0.20 m, HZ=0.10 m, and 2000 N load
 ```
 
+The chat agent can also help with catalog browsing, for example:
+
+```text
+list available steel materials
+list available steel sections
+use S355 steel
+use RHS 150x100x5
+use a circular section with diameter 80 mm
+```
+
 Important:
 
 - Always include explicit units for geometry.
 - Inputs like `hy 20, hz 10` are now rejected as ambiguous.
 - The agent only runs the simulation after explicit confirmation.
+
+## Catalogs
+
+Materials and sections are loaded from `library/` through a manifest-driven
+catalog layer.
+
+- Material references are stored with each family. Steel, aluminum, concrete,
+  and wood materials are tagged with their Eurocode source.
+- Concrete supports a formula fallback when a requested grade is not present in
+  the CSV table. The fallback uses:
+  `fcm = fck + 8 MPa` and `Ecm = 22 * (fcm / 10)^0.3 GPa`.
+- Simple rectangular and circular sections can be generated without a CSV row.
+  They return `A`, `Iy`, `Iz`, `IT`, `Avy`, and `Avz` in solver-facing units.
+- For generated solid rectangles, `IT` uses the Saint-Venant approximation
+  supplied in the project requirements and `Avy = Avz = 5/6 * A`.
+- For generated solid circles, `IT = pi*d^4/32` and `Avy = Avz = 0.9 * A`.
 
 ## Outputs
 
@@ -116,7 +139,10 @@ Generated files are written to [`workspace/`](c:\Users\EX-GIGI\training\workspac
 
 ## Notes
 
-- The chat agent now exposes only the guarded high-level simulation tool.
+- The chat agent exposes catalog lookup tools for materials and sections plus the guarded high-level simulation tool.
+- The LLM may use catalog tools to understand user requests and answer list/lookup questions.
+- Final analysis input resolution and simulation execution still remain deterministic in Python code.
+- Beam section transfer to Code_Aster uses `A`, `IY`, `IZ`, `JX`, `AY`, and `AZ`.
 - Code_Aster result-file naming is aligned with the export `nomjob`.
 - The MFZ contour reports beam length in meters correctly.
 - The deterministic pipeline now passes the applied load correctly as `FY_N`.
