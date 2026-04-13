@@ -58,11 +58,20 @@ def resolve_analysis_inputs(values: dict[str, Any]) -> dict[str, Any]:
         material_hint = resolved.get("material_hint")
         if material_hint:
             try:
-                material = search_material(_expand_concrete_hint(material_hint))
+                expanded_hint = _expand_concrete_hint(material_hint)
+                material = search_material(expanded_hint)
                 resolved["E"] = material["E"]
                 resolved["NU"] = material["NU"]
                 resolved["RHO"] = material["RHO"]
                 resolved["resolved_material"] = material
+                if expanded_hint != material_hint:
+                    notes.append(
+                        f"Concrete shorthand '{material_hint}' was resolved to catalog grade '{expanded_hint}'."
+                    )
+                if material.get("derived"):
+                    notes.append(
+                        f"Concrete properties were calculated by Eurocode formula from grade '{material.get('name')}'."
+                    )
             except Exception:
                 notes.append(f"Material '{material_hint}' was not found in the catalog.")
         else:

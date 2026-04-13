@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import difflib
 import json
 import re
 import unicodedata
@@ -177,11 +178,19 @@ class Catalog:
 
     def _resolve_family(self, family: str, families: dict[str, FamilyIndex]) -> str:
         normalized = _normalize_token(family)
+        lookup: dict[str, str] = {}
         for canonical_name, index in families.items():
             if normalized == _normalize_token(canonical_name):
                 return canonical_name
-            if normalized in {_normalize_token(alias) for alias in index.aliases}:
+            lookup[_normalize_token(canonical_name)] = canonical_name
+            alias_tokens = {_normalize_token(alias) for alias in index.aliases}
+            if normalized in alias_tokens:
                 return canonical_name
+            for alias in index.aliases:
+                lookup[_normalize_token(alias)] = canonical_name
+        close = difflib.get_close_matches(normalized, list(lookup.keys()), n=1, cutoff=0.75)
+        if close:
+            return lookup[close[0]]
         raise UnknownFamilyError(f"Unknown family '{family}'")
 
     def _build_material_index(self) -> dict[str, FamilyIndex]:
@@ -354,3 +363,11 @@ def search_section(section_name: str) -> dict[str, Any]:
         if normalized == _normalize_token(family):
             continue
     raise UnknownSectionError(f"Section '{section_name}' not found in the catalog")
+
+
+def resolve_material_family_name(family: str) -> str:
+    return _CATALOG._resolve_family(family, _CATALOG._material_families)
+
+
+def resolve_section_family_name(family: str) -> str:
+    return _CATALOG._resolve_family(family, _CATALOG._section_families)

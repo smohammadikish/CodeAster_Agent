@@ -1,13 +1,15 @@
 import unittest
 from unittest.mock import Mock
 
-from main_agent import (build_agent, build_confirmation_summary, build_pipeline_kwargs_from_sheet,
+from main_agent import (build_agent, build_catalog_family_guidance,
+                        build_confirmation_summary, build_pipeline_kwargs_from_sheet,
                         build_post_run_idle_message,
                         build_post_run_message, build_post_success_message,
                         build_system_prompt, get_sheet_signature,
                         is_exit_input,
                         run_agent_one_shot, run_full_pipeline)
 from input_parser import ParameterSheet, build_state_aware_input
+from chat.resolution import resolve_analysis_inputs
 
 
 class AgentPromptUnitTests(unittest.TestCase):
@@ -15,6 +17,13 @@ class AgentPromptUnitTests(unittest.TestCase):
         prompt = build_system_prompt()
         self.assertIn("You must accept explicit user units and convert them internally.", prompt)
         self.assertIn("Do not ask the user to manually convert", prompt)
+        self.assertIn("Keep normal replies compact and guided.", prompt)
+        self.assertIn("Explicitly say they are suggestions from the local database/catalog.", prompt)
+        self.assertIn("resolve it to the closest standard catalog grade such as C25/30", prompt)
+        self.assertIn("calculate the concrete properties directly with the Eurocode formula", prompt)
+        self.assertIn("material, or I can suggest from my Eurocode-based database", prompt)
+        self.assertIn("section, or I can suggest one", prompt)
+        self.assertIn("Never invent catalog suggestions.", prompt)
         self.assertIn("length_unit", prompt)
         self.assertIn("hy_unit", prompt)
         self.assertIn("hz_unit", prompt)
@@ -85,9 +94,9 @@ class AgentPromptUnitTests(unittest.TestCase):
         self.assertTrue(kwargs["confirm"])
         self.assertIn("AY_mm2", kwargs)
         self.assertIn("AZ_mm2", kwargs)
-        self.assertIn("All required parameters are available.", summary)
-        self.assertIn("- AY:", summary)
-        self.assertIn("- AZ:", summary)
+        self.assertIn("All required parameters are ready.", summary)
+        self.assertIn("Solver properties were resolved from the selected catalog entries.", summary)
+        self.assertIn("- Material: C30/37", summary)
         self.assertIn("Reply with 'yes', 'confirm', or 'run it'", summary)
 
     def test_exit_detection_handles_farewell_phrases(self) -> None:
@@ -113,9 +122,52 @@ class AgentPromptUnitTests(unittest.TestCase):
         message = build_post_success_message(run_output)
         self.assertIn("Simulation finished successfully.", message)
         self.assertIn("Run ID: 20260408_185800_beam_6e5acb74", message)
-        self.assertIn("Would you like to do another analysis or finish the process?", message)
+        self.assertIn("You can change parameters for another run, or finish the process.", message)
         self.assertNotIn("Input units:", message)
         self.assertNotIn("Used parameters:", message)
+
+    def test_confirmation_summary_marks_formula_derived_concrete(self) -> None:
+        sheet = ParameterSheet(
+            {
+                "length_m": 5.0,
+                "length_unit": "m",
+                "n_elems": 11,
+                "FY": 1.2,
+                "force_unit": "kN",
+                "material_hint": "C32/40",
+                "section_shape": "rectangle",
+                "HY": 40.0,
+                "hy_unit": "cm",
+                "HZ": 25.0,
+                "hz_unit": "cm",
+            }
+        )
+        summary = build_confirmation_summary(sheet)
+        self.assertIn("calculated by Eurocode formula", summary)
+
+    def test_resolution_maps_c25_shorthand_to_catalog_grade(self) -> None:
+        resolved = resolve_analysis_inputs({"material_hint": "C25", "length_m": 5.0, "n_elems": 11, "FY": 1.2})
+        material = resolved["resolved"]["resolved_material"]
+        self.assertEqual(material["name"], "C25/30")
+        self.assertFalse(material["derived"])
+        self.assertTrue(
+            any("Concrete shorthand 'C25' was resolved to catalog grade 'C25/30'." in note for note in resolved["notes"])
+        )
+
+    def test_catalog_family_guidance_lists_real_wood_entries(self) -> None:
+        sheet = ParameterSheet({"material_hint": "wood"})
+        message = build_catalog_family_guidance(sheet)
+        self.assertIsNotNone(message)
+        self.assertIn("C16", message)
+        self.assertIn("C24", message)
+        self.assertIn("GL24h (Glulam)", message)
+
+    def test_catalog_family_guidance_handles_aluminum_typo(self) -> None:
+        sheet = ParameterSheet({"material_hint": "alumium"})
+        message = build_catalog_family_guidance(sheet)
+        self.assertIsNotNone(message)
+        self.assertIn("6061-T6", message)
+        self.assertIn("6082-T6", message)
 
     def test_rerun_signature_changes_when_sheet_changes(self) -> None:
         sheet = ParameterSheet()
@@ -128,7 +180,7 @@ class AgentPromptUnitTests(unittest.TestCase):
     def test_post_run_idle_message_is_short(self) -> None:
         self.assertEqual(
             build_post_run_idle_message(),
-            "Would you like to do another analysis or finish the process?",
+            "You can change parameters for another run, or finish the process.",
         )
 
 

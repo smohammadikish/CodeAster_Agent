@@ -3,7 +3,8 @@ import unittest
 
 from library.catalog import (build_parametric_section, get_material,
                              get_section, list_material_families,
-                             list_sections, search_material)
+                             list_sections, resolve_material_family_name,
+                             search_material)
 
 
 class CatalogTests(unittest.TestCase):
@@ -44,6 +45,9 @@ class CatalogTests(unittest.TestCase):
     def test_search_material_finds_glulam_entry(self) -> None:
         material = search_material("gl24h")
         self.assertEqual(material["name"], "GL24h (Glulam)")
+
+    def test_material_family_resolution_handles_common_typo(self) -> None:
+        self.assertEqual(resolve_material_family_name("alumium"), "aluminum")
 
     def test_rectangular_section_uses_requested_torsion_formula(self) -> None:
         section = build_parametric_section("rectangular", width_mm=100, height_mm=200)

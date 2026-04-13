@@ -4,6 +4,9 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from library import (resolve_material_family_name, resolve_section_family_name,
+                     search_material, search_section)
+
 from .extraction import extract_state_update
 from .parsing import parse_beam_request
 from .resolution import resolve_analysis_inputs
@@ -13,12 +16,75 @@ from .resolution import resolve_analysis_inputs
 # that is attached to the LLM input.
 
 
+def _is_material_family_only(value: str) -> bool:
+    try:
+        resolve_material_family_name(value)
+    except Exception:
+        return False
+    try:
+        search_material(value)
+        return False
+    except Exception:
+        return True
+
+
+def _is_section_family_only(value: str) -> bool:
+    try:
+        resolve_section_family_name(value)
+    except Exception:
+        return False
+    try:
+        search_section(value)
+        return False
+    except Exception:
+        return True
+
+
 @dataclass
 class ParameterSheet:
     # This class stores the running conversation state.
     # It merges new user input and reports what is still missing.
     values: dict[str, Any] = field(default_factory=dict)
     last_user_intent: str = "unknown"
+
+    def _normalize_contextual_hints(
+        self, updates: dict[str, Any], previous_values: dict[str, Any]
+    ) -> dict[str, Any]:
+        normalized = dict(updates)
+        previous_resolution = resolve_analysis_inputs(previous_values)
+        previous_resolved = previous_resolution["resolved"]
+        material_fixed = previous_resolved.get("resolved_material") is not None
+        section_fixed = previous_resolved.get("resolved_section") is not None
+        section_missing = "section_definition" in previous_resolution["missing"]
+        material_missing = any(
+            key in previous_resolution["missing"] for key in ("E", "NU", "RHO")
+        )
+
+        material_hint = normalized.get("material_hint")
+        if (
+            isinstance(material_hint, str)
+            and material_fixed
+            and not section_fixed
+            and section_missing
+            and "section_hint" not in normalized
+            and _is_section_family_only(material_hint)
+        ):
+            normalized["section_hint"] = material_hint
+            normalized.pop("material_hint", None)
+
+        section_hint = normalized.get("section_hint")
+        if (
+            isinstance(section_hint, str)
+            and section_fixed
+            and not material_fixed
+            and material_missing
+            and "material_hint" not in normalized
+            and _is_material_family_only(section_hint)
+        ):
+            normalized["material_hint"] = section_hint
+            normalized.pop("section_hint", None)
+
+        return normalized
 
     def merge_update_payload(self, payload: dict[str, Any]) -> None:
         updates = payload.get("updates", {})
@@ -58,11 +124,16 @@ class ParameterSheet:
         self.last_user_intent = payload.get("user_intent", self.last_user_intent)
 
     def update_from_text(self, text: str, llm: Any | None = None) -> dict[str, Any]:
-        parsed = parse_beam_request(text)
+        previous_values = self.to_dict()
+        parsed = self._normalize_contextual_hints(parse_beam_request(text), previous_values)
         self.values.update(parsed)
         if llm is not None:
             try:
                 payload = extract_state_update(llm, text, self.to_dict())
+                payload["updates"] = self._normalize_contextual_hints(
+                    payload.get("updates", {}),
+                    previous_values,
+                )
                 self.merge_update_payload(payload)
             except Exception:
                 pass
@@ -83,12 +154,26 @@ class ParameterSheet:
             return ""
 
         resolution = self.resolved_state()
+        resolved = resolution["resolved"]
         parts = [
             "[Deterministic parameter sheet]",
             "Use this accumulated structured state from the conversation if relevant:",
             json.dumps(parsed, ensure_ascii=True),
             f"Missing required fields: {', '.join(resolution['missing']) if resolution['missing'] else 'none'}",
         ]
+        material = resolved.get("resolved_material")
+        if material:
+            material_name = material.get("name")
+            material_ref = material.get("reference")
+            material_mode = "formula" if material.get("derived") else "catalog"
+            parts.append(
+                f"Resolved material: {material_name} [{material_mode}] ({material_ref})"
+            )
+        section = resolved.get("resolved_section")
+        if section:
+            section_name = section.get("Profile") or section.get("Section") or section.get("shape")
+            section_ref = section.get("reference", "generated section")
+            parts.append(f"Resolved section: {section_name} ({section_ref})")
         if resolution["notes"]:
             parts.append("Resolution notes: " + " | ".join(resolution["notes"]))
         return "\n".join(parts)

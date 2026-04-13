@@ -119,6 +119,21 @@ class InputParserTests(unittest.TestCase):
         self.assertIsNotNone(resolved["AY_mm2"])
         self.assertIsNotNone(resolved["AZ_mm2"])
 
+    def test_family_name_after_material_selection_routes_to_section(self) -> None:
+        sheet = ParameterSheet(
+            {
+                "length_m": 5.0,
+                "length_unit": "m",
+                "n_elems": 12,
+                "FY": 1.2,
+                "force_unit": "kN",
+                "material_hint": "6082-T6",
+            }
+        )
+        build_state_aware_input("aluminum", sheet)
+        self.assertEqual(sheet.to_dict()["material_hint"], "6082-T6")
+        self.assertEqual(sheet.to_dict()["section_hint"], "aluminum")
+
 
 if __name__ == "__main__":
     unittest.main()

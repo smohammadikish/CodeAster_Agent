@@ -19,8 +19,28 @@ def list_material_catalog_tool(family: str = "") -> str:
     """List material families or available materials in one family."""
     try:
         if family.strip():
-            return _json({"family": family, "materials": list_materials(family)})
-        return _json({"families": list_material_families()})
+            return _json(
+                {
+                    "family": family,
+                    "materials": list_materials(family),
+                    "source_note": (
+                        "These are material entries currently available in the local catalog. "
+                        "Catalog materials are database suggestions, not the only valid choices."
+                    ),
+                    "guidance": (
+                        "Where applicable, catalog entries are sourced from Eurocode references. "
+                        "If the user wants a material outside the catalog, ask for explicit E, NU, and RHO."
+                    ),
+                }
+            )
+        return _json(
+            {
+                "families": list_material_families(),
+                "source_note": (
+                    "These families come from the local material catalog used by the application."
+                ),
+            }
+        )
     except Exception as exc:
         return _json({"error": "catalog_lookup_failed", "message": str(exc)})
 
@@ -37,7 +57,19 @@ def get_material_catalog_tool(family: str, material_name: str) -> str:
     - FY/FCK/FCM in Pa when available
     """
     try:
-        return _json(get_material(family, material_name))
+        material = get_material(family, material_name)
+        return _json(
+            {
+                **material,
+                "catalog_note": (
+                    "This material comes from the local catalog used by the application."
+                ),
+                "guidance": (
+                    "Use this as a catalog suggestion/reference. "
+                    "If the user prefers another material, ask for explicit properties."
+                ),
+            }
+        )
     except Exception as exc:
         return _json(
             {
@@ -54,8 +86,28 @@ def list_section_catalog_tool(family: str = "") -> str:
     """List section families or available sections in one family."""
     try:
         if family.strip():
-            return _json({"family": family, "sections": list_sections(family)})
-        return _json({"families": list_section_families()})
+            return _json(
+                {
+                    "family": family,
+                    "sections": list_sections(family),
+                    "source_note": (
+                        "These are section entries currently available in the local catalog. "
+                        "Catalog sections are database suggestions, not the only valid choices."
+                    ),
+                    "guidance": (
+                        "If the user wants a section outside the catalog, ask for explicit section properties "
+                        "or dimensions for a parametric section."
+                    ),
+                }
+            )
+        return _json(
+            {
+                "families": list_section_families(),
+                "source_note": (
+                    "These families come from the local section catalog used by the application."
+                ),
+            }
+        )
     except Exception as exc:
         return _json({"error": "catalog_lookup_failed", "message": str(exc)})
 
@@ -78,6 +130,13 @@ def get_section_catalog_tool(family: str, section_name: str) -> str:
         return _json(
             {
                 **section,
+                "catalog_note": (
+                    "This section comes from the local catalog used by the application."
+                ),
+                "guidance": (
+                    "Use this as a catalog suggestion/reference. "
+                    "If the user prefers another section, ask for explicit section properties or dimensions."
+                ),
                 "code_aster": {
                     "SECTION": "GENERALE",
                     "CARA": ["A", "IY", "IZ", "JX", "AY", "AZ"],

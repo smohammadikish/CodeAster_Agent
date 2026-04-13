@@ -28,6 +28,8 @@ from langchain_openai import ChatOpenAI
 from env_loader import load_env  # noqa: E402
 from input_parser import (ParameterSheet, build_state_aware_input,
                           parse_beam_request, resolve_analysis_inputs)
+from library import (list_materials, list_sections, resolve_material_family_name,
+                     resolve_section_family_name)
 from storage import (create_run_id, ensure_base_dirs, ensure_run_dirs,
                      finalize_run, record_artifact, record_tool_event,
                      register_run, resolve_workspace_file, utc_now_iso)
@@ -807,6 +809,20 @@ CATALOG CAPABILITIES
 BEHAVIOR RULES - FOLLOW THESE STRICTLY
 ============================================================
 
+RESPONSE STYLE
+- Keep normal replies compact and guided.
+- Prefer 1 short intro sentence plus at most 4 bullets.
+- Ask only for the missing items needed for the next step.
+- Do not produce long dumps of solver properties unless the user explicitly asks for them.
+- If the user asks for suggestions, give a short recommendation with a brief reason, then ask the next missing question.
+- When listing missing inputs, prefer plain user language such as 'material' or 'section' instead of raw solver fields like E, NU, RHO, A, IY, IZ, JX, AY, AZ unless the user asked for raw properties.
+- For a partially defined beam, prefer wording like:
+  "Please add:
+  - elements
+  - material, or I can suggest from my Eurocode-based database
+  - section, or I can suggest one"
+- Never invent catalog suggestions. Any suggested material or section must come from the real local catalog/database or from parametric section formulas.
+
 1) Use catalog tools when the user asks for available materials, available sections, or named catalog items.
    - Use list_material_catalog for material lists.
    - Use get_material_catalog for one named material.
@@ -814,6 +830,7 @@ BEHAVIOR RULES - FOLLOW THESE STRICTLY
    - Use get_section_catalog for one named section.
    - Use build_parametric_section_catalog for simple rectangle or circle sections.
    - Never invent catalog contents from memory.
+   - If the user selects only a family such as steel, aluminum, concrete, or wood, list the actual entries available in that family.
 
 2) Do not call run_full_pipeline until all required parameters are known:
    - length_m  (beam length)
@@ -837,6 +854,16 @@ BEHAVIOR RULES - FOLLOW THESE STRICTLY
    - Prefer the internal catalog and formulas to resolve properties.
    - Use Eurocode references for catalog materials.
    - For concrete grades not in the table, use the formula fallback.
+   - If the user says a shorthand concrete grade like C25, resolve it to the closest standard catalog grade such as C25/30 when available.
+   - If the user gives a concrete grade not present in the table, do not ask again; calculate the concrete properties directly with the Eurocode formula from the provided fck.
+   - When mentioning the concrete fallback, say clearly that E is calculated with the Eurocode formula based on the user's fck.
+
+5a) When suggesting materials or sections from the catalog:
+   - Explicitly say they are suggestions from the local database/catalog.
+   - Mention that many catalog items are based on Eurocode references.
+   - Make clear they are not the only valid choices.
+   - Tell the user they may instead provide their own material properties or section properties/dimensions.
+   - Do not promise an internet search unless that capability is actually available in the current app/session.
 
 6) When the user does not know material properties and no catalog match exists:
    - Do not call run_full_pipeline.
@@ -844,6 +871,8 @@ BEHAVIOR RULES - FOLLOW THESE STRICTLY
 
 7) When all parameters are known:
    - Summarize them clearly and preserve the user's units.
+   - Keep the summary short and user-facing.
+   - If a concrete material was resolved by formula instead of the catalog table, mark it with '(calculated by Eurocode formula)'.
    - Then ask:
        "Do you confirm running the simulation with these values?"
    - Never call run_full_pipeline unless the user explicitly confirms with:
@@ -914,12 +943,12 @@ def build_post_success_message(run_output: str) -> str:
         kept.append(line)
     if not kept:
         kept = ["Simulation finished successfully."]
-    kept.append("Would you like to do another analysis or finish the process?")
+    kept.append("You can change parameters for another run, or finish the process.")
     return "\n".join(kept)
 
 
 def build_post_run_idle_message() -> str:
-    return "Would you like to do another analysis or finish the process?"
+    return "You can change parameters for another run, or finish the process."
 
 
 def get_sheet_signature(sheet: ParameterSheet) -> str:
@@ -931,49 +960,37 @@ def build_confirmation_summary(sheet: ParameterSheet) -> str:
     values = resolution["resolved"]
     material = values.get("resolved_material")
     section = values.get("resolved_section")
+    material_suffix = (
+        " (calculated by Eurocode formula)"
+        if material and material.get("derived")
+        else ""
+    )
     material_line = (
-        f"- Material: {material.get('name')} ({material.get('reference')})\n"
+        f"- Material: {material.get('name')} ({material.get('reference')}){material_suffix}"
         if material
         else ""
     )
     section_name = section.get("Profile") or section.get("Section") or section.get("shape") if section else None
     section_ref = section.get("reference") if section else None
     section_line = (
-        f"- Section: {section_name} ({section_ref})\n"
+        f"- Section: {section_name} ({section_ref})"
         if section_name
         else ""
     )
-    note_line = (
-        "Notes:\n- " + "\n- ".join(resolution["notes"]) + "\n"
-        if resolution["notes"]
-        else ""
-    )
     lines = [
-        "All required parameters are available.",
-        "Current values:",
+        "All required parameters are ready.",
         f"- Length: {values['length_m']} {values.get('length_unit', DEFAULT_INPUT_LENGTH_UNIT)}",
         f"- Elements: {values['n_elems']}",
-        f"- FY: {values['FY']} {values.get('force_unit', DEFAULT_INPUT_FORCE_UNIT)}",
+        f"- Load FY: {values['FY']} {values.get('force_unit', DEFAULT_INPUT_FORCE_UNIT)}",
     ]
     if material_line:
-        lines.append(material_line.strip())
+        lines.append(material_line)
     if section_line:
-        lines.append(section_line.strip())
-    lines.extend(
-        [
-            f"- E: {values['E']}",
-            f"- NU: {values['NU']}",
-            f"- RHO: {values['RHO']}",
-            f"- A: {values['A_mm2']} mm^2",
-            f"- IY: {values['IY_mm4']} mm^4",
-            f"- IZ: {values['IZ_mm4']} mm^4",
-            f"- JX: {values['JX_mm4']} mm^4",
-            f"- AY: {values['AY_mm2']} mm^2",
-            f"- AZ: {values['AZ_mm2']} mm^2",
-        ]
-    )
-    if note_line:
-        lines.append(note_line.strip())
+        lines.append(section_line)
+    if material or section:
+        lines.append("- Solver properties were resolved from the selected catalog entries.")
+    if resolution["notes"]:
+        lines.extend(f"- Note: {note}" for note in resolution["notes"])
     lines.append("Reply with 'yes', 'confirm', or 'run it' to start the simulation.")
     return "\n".join(lines)
 
@@ -1001,6 +1018,51 @@ def build_pipeline_kwargs_from_sheet(sheet: ParameterSheet) -> dict[str, Any]:
         "force_unit": values.get("force_unit", DEFAULT_INPUT_FORCE_UNIT),
         "confirm": True,
     }
+
+
+def build_catalog_family_guidance(sheet: ParameterSheet) -> str | None:
+    values = sheet.to_dict()
+    resolution = sheet.resolved_state()
+    lines: list[str] = []
+
+    material_hint = values.get("material_hint")
+    if material_hint and not resolution["resolved"].get("resolved_material"):
+        try:
+            material_family = resolve_material_family_name(str(material_hint))
+            material_options = list_materials(material_family)
+            shown = material_options[:8]
+            lines.append(
+                f"For `{material_family}` materials in the local Eurocode-based database, available options are:"
+            )
+            lines.extend(f"- {item}" for item in shown)
+            if len(material_options) > len(shown):
+                lines.append("- ...")
+            lines.append("Choose one, or provide `E`, `NU`, and `RHO`.")
+        except Exception:
+            pass
+
+    section_hint = values.get("section_hint")
+    if section_hint and not resolution["resolved"].get("resolved_section"):
+        try:
+            section_family = resolve_section_family_name(str(section_hint))
+            if section_family == "parametric":
+                lines.append(
+                    "For the section, you can use a parametric `rectangle` or `circle` and provide the dimensions."
+                )
+            else:
+                section_options = list_sections(section_family)
+                shown = section_options[:8]
+                lines.append(
+                    f"For `{section_family}` sections in the local database, available options are:"
+                )
+                lines.extend(f"- {item}" for item in shown)
+                if len(section_options) > len(shown):
+                    lines.append("- ...")
+                lines.append("Choose one, or provide your own section properties/dimensions.")
+        except Exception:
+            pass
+
+    return "\n".join(lines) if lines else None
 
 
 def build_agent() -> AgentExecutor:
@@ -1084,9 +1146,9 @@ def run_agent_one_shot(
     - The system converts them internally for the tools.
     """
     console_print("\nAGENT MODE (one-shot with tools)\n")
-    console_print("Please provide geometry with explicit units such as m, cm, mm, N, or kN.")
+    console_print("Describe the beam with the values you know, and include units for each dimension or load.")
     console_print(
-        "   Example: 5 m beam, 20 cm height, 12 cm width, 1.2 kN load.\n"
+        "   Examples: 5 m beam with 1.2 kN load | 5 m beam, S355, IPE160, 12 elements, 1.2 kN tip load.\n"
     )
 
     ambiguous_message = get_ambiguous_dimension_message(user_input)
@@ -1123,9 +1185,9 @@ def run_agent_chat(agent_executor: AgentExecutor, extractor_llm: Any | None = No
     console_print(
         "Type 'exit', 'quit', 'stop', 'end', 'finish', or 'cancel' to terminate.\n"
     )
-    console_print("Please provide geometry and load values with explicit units.")
+    console_print("Describe the beam with the values you know, and include units for each dimension or load.")
     console_print(
-        "   Example: 5 m beam, 20 cm height, 12 cm width, 1.2 kN load.\n"
+        "   Examples: 5 m beam with 1.2 kN load | 5 m beam, S355, IPE160, 12 elements, 1.2 kN tip load.\n"
     )
 
     chat_history: List[BaseMessage] = []
@@ -1194,6 +1256,13 @@ def run_agent_chat(agent_executor: AgentExecutor, extractor_llm: Any | None = No
                 console_print("\nAgent:\n" + output_str + "\n")
                 chat_history.append(HumanMessage(content=user_input))
                 chat_history.append(AIMessage(content=output_str))
+                continue
+
+            family_guidance = build_catalog_family_guidance(parameter_sheet)
+            if family_guidance:
+                console_print("\nAgent:\n" + family_guidance + "\n")
+                chat_history.append(HumanMessage(content=user_input))
+                chat_history.append(AIMessage(content=family_guidance))
                 continue
 
             result = agent_executor.invoke(

@@ -13,6 +13,10 @@ FORCE_UNIT = r"kN|N|kn|n"
 # Pattern block for common material names typed by the user.
 MATERIAL_PATTERN = re.compile(
     r"\b("
+    r"steel|structural steel|"
+    r"aluminum|aluminium|alumium|aluminum alloy|aluminium alloy|"
+    r"concrete|reinforced concrete|rc|"
+    r"wood|timber|glulam|"
     r"S\s*[- ]?\s*\d{3}|"
     r"C\s*\d+\s*/\s*\d+|"
     r"GL\s*\d+\s*[A-Z]?|"
