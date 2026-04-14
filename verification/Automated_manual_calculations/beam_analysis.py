@@ -653,7 +653,7 @@ def _support_type_from_ddl_impo(entry: str) -> str:
     has_dx = "DX" in constrained
     has_dy = "DY" in constrained
     has_drz = "DRZ" in constrained
-    other_constraints = constrained - {"DX", "DY", "DRZ"}
+    other_constraints = constrained - {"DX", "DY", "DRZ", "DZ", "DRX"}
 
     if has_dx and has_dy and has_drz:
         return "fixed"

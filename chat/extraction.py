@@ -3,10 +3,19 @@ from __future__ import annotations
 import json
 from typing import Any
 
-
 # This module defines the strict JSON contract used for optional LLM extraction.
 
-USER_INTENTS = {"provide_parameters", "confirm_run", "cancel", "question", "unknown"}
+USER_INTENTS = {
+    "provide_parameters",
+    "confirm_run",
+    "cancel",
+    "question",
+    "unknown",
+}
+SCENARIOS = {
+    "cantilever_tip_load",
+    "simply_supported_midpoint_load",
+}
 
 # LLM extraction schema.
 # It limits what the model can write back into the state.
@@ -62,6 +71,7 @@ EXTRACTION_SCHEMA: dict[str, Any] = {
                     "required": ["value", "unit"],
                     "additionalProperties": False,
                 },
+                "scenario": {"type": "string", "enum": sorted(SCENARIOS)},
                 "E": {"type": "number"},
                 "NU": {"type": "number"},
                 "RHO": {"type": "number"},
@@ -112,6 +122,7 @@ def validate_state_update(payload: dict[str, Any]) -> dict[str, Any]:
 
     validated_updates: dict[str, Any] = {}
     scalar_keys = {
+        "scenario",
         "E",
         "NU",
         "RHO",
@@ -154,7 +165,7 @@ def validate_state_update(payload: dict[str, Any]) -> dict[str, Any]:
             }
         elif key == "n_elems":
             validated_updates[key] = int(value)
-        elif key in {"material_hint", "section_hint", "section_shape"}:
+        elif key in {"scenario", "material_hint", "section_hint", "section_shape"}:
             validated_updates[key] = str(value)
         else:
             validated_updates[key] = float(value)
@@ -181,6 +192,16 @@ def extract_state_update(llm: Any, text: str, current_state: dict[str, Any]) -> 
         "- Only include fields explicitly supported by the schema.\n"
         "- If a value is not stated in the latest message, omit it from updates.\n"
         "- Preserve user units.\n"
+        "- Use the latest message together with the current state to resolve short follow-ups.\n"
+        "- If the user says 'first' or 'second' while choosing between supported scenarios, map them to:\n"
+        "  first -> cantilever_tip_load\n"
+        "  second -> simply_supported_midpoint_load\n"
+        "- If the user says 'simple beam', 'simply supported', or equivalent, set scenario to simply_supported_midpoint_load.\n"
+        "- If the user says 'cantilever', set scenario to cantilever_tip_load.\n"
+        "- If the user says things like 'same as before but 12 elements', only update the changed field.\n"
+        "- If the user replies with a catalog item like 'S235' or 'IPE160', put it in the matching hint field.\n"
+        "- Do not move a scenario name into material_hint or section_hint.\n"
+        "- Do not move material or section hints into each other unless the latest message clearly names that category.\n"
         "- For unclear text, leave the field out instead of guessing.\n"
         "- Output JSON only."
     )

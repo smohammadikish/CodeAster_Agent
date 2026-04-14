@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+REPORT_ZERO_TOL = 1e-9
+
 
 def load_result_json(filepath: Path) -> dict[str, Any]:
     """Load a result JSON file."""
@@ -34,15 +36,16 @@ def _load_code_aster_reactions(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
 
+    reactions: list[dict[str, Any]] = []
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         if "REAC_NODA" not in raw_line:
             continue
         tokens = raw_line.split()
         if len(tokens) < 13:
             continue
-        return [
+        reactions.append(
             {
-                "name": "BASE",
+                "name": str(tokens[4]),
                 "x": float(tokens[5]) / 1000.0,
                 "values": (
                     float(tokens[7]),
@@ -50,8 +53,22 @@ def _load_code_aster_reactions(path: Path) -> list[dict[str, Any]]:
                     float(tokens[12]) / 1000.0,
                 ),
             }
-        ]
-    return []
+        )
+
+    if not reactions:
+        return []
+
+    reactions.sort(key=lambda item: item["x"])
+    for index, reaction in enumerate(reactions):
+        if len(reactions) == 1:
+            reaction["name"] = "BASE"
+        elif index == 0:
+            reaction["name"] = "BASE"
+        elif index == len(reactions) - 1:
+            reaction["name"] = "TIP"
+        else:
+            reaction["name"] = f"SUPPORT_{index + 1}"
+    return reactions
 
 
 def _load_code_aster_displacements(path: Path) -> dict[str, dict[str, float]]:
@@ -188,6 +205,10 @@ def extract_displacements(result: dict[str, Any]) -> dict[str, dict[str, float]]
 
 def compute_difference(value1: float, value2: float) -> tuple[float, float]:
     """Compute absolute and relative difference between two values."""
+    if abs(value1) <= REPORT_ZERO_TOL:
+        value1 = 0.0
+    if abs(value2) <= REPORT_ZERO_TOL:
+        value2 = 0.0
     abs_diff = abs(value1 - value2)
 
     if abs(value2) > 1e-12:

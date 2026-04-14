@@ -11,7 +11,6 @@ from typing import Any
 
 from .section_calculators import circular_section, rectangular_section
 
-
 BASE_DIR = Path(__file__).resolve().parent
 MANIFEST_PATH = BASE_DIR / "catalog_manifest.json"
 

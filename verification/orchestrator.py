@@ -15,18 +15,13 @@ from beam_analysis import analyze_beam_source
 from comparison_reporter import generate_comparison_report
 from report_renderer import render_report
 from shared_input import get_input_source_info, resolve_input_source_path
-from ver_opensees.config import (
-    load_beam_input,
-    resolve_input_source_path as resolve_opensees_path,
-)
+from ver_opensees.config import load_beam_input
+from ver_opensees.config import \
+    resolve_input_source_path as resolve_opensees_path
 from ver_opensees.runner import run_analysis
-from workspace_manager import (
-    create_embedded_verification_workspace,
-    create_run_workspace,
-    save_comparison_report,
-    save_report,
-    save_solver_result,
-)
+from workspace_manager import (create_embedded_verification_workspace,
+                               create_run_workspace, save_comparison_report,
+                               save_report, save_solver_result)
 
 
 def run_automated_manual(input_path: Path) -> tuple[dict[str, Any], str | None]:

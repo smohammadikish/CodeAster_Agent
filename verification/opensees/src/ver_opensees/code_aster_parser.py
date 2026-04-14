@@ -6,13 +6,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from ver_opensees.models import (
-    BeamInput,
-    BeamMaterial,
-    BeamSection,
-    InputSource,
-    PointLoad,
-)
+from ver_opensees.models import (BeamInput, BeamMaterial, BeamSection,
+                                 InputSource, PointLoad)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_WORKSPACE = REPO_ROOT / "workspace"
@@ -353,6 +348,23 @@ def _extract_factor_blocks(block: str, keyword: str) -> list[str]:
         open_index = index + len(keyword) + 3
         factors.append(_slice_balanced_parentheses(block, open_index))
         start = open_index + 1
+    if factors:
+        return factors
+
+    tuple_token = f"{keyword}=("
+    tuple_index = block.find(tuple_token)
+    if tuple_index == -1:
+        raise ValueError(f"Could not find any '{keyword}=_F(...)' blocks.")
+
+    tuple_open_index = tuple_index + len(keyword) + 1
+    tuple_content = _slice_balanced_parentheses(block, tuple_open_index)
+    search_start = 0
+    while True:
+        factor_index = tuple_content.find("_F(", search_start)
+        if factor_index == -1:
+            break
+        factors.append(_slice_balanced_parentheses(tuple_content, factor_index + 2))
+        search_start = factor_index + 3
     if not factors:
         raise ValueError(f"Could not find any '{keyword}=_F(...)' blocks.")
     return factors
@@ -461,7 +473,7 @@ def _is_pinned_support(components: dict[str, float]) -> bool:
 
 
 def _is_roller_support(components: dict[str, float]) -> bool:
-    return components.keys() == {"DY"}
+    return set(components).issubset({"DY", "DZ"}) and "DY" in components and "DX" not in components and "DRZ" not in components
 
 
 def _extract_point_force(components: dict[str, float]) -> tuple[str, float]:

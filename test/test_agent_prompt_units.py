@@ -1,15 +1,15 @@
 import unittest
 from unittest.mock import Mock
 
-from main_agent import (build_agent, build_catalog_family_guidance,
-                        build_confirmation_summary, build_pipeline_kwargs_from_sheet,
-                        build_post_run_idle_message,
-                        build_post_run_message, build_post_success_message,
-                        build_system_prompt, get_sheet_signature,
-                        is_exit_input,
-                        run_agent_one_shot, run_full_pipeline)
-from input_parser import ParameterSheet, build_state_aware_input
 from chat.resolution import resolve_analysis_inputs
+from input_parser import ParameterSheet, build_state_aware_input
+from main_agent import (build_agent, build_catalog_family_guidance,
+                        build_confirmation_summary,
+                        build_pipeline_kwargs_from_sheet,
+                        build_post_run_idle_message, build_post_run_message,
+                        build_post_success_message, build_system_prompt,
+                        extract_scenario_from_text, get_sheet_signature,
+                        is_exit_input, run_agent_one_shot, run_full_pipeline)
 
 
 class AgentPromptUnitTests(unittest.TestCase):
@@ -62,6 +62,33 @@ class AgentPromptUnitTests(unittest.TestCase):
         self.assertIn("simulation has NOT been confirmed", result)
         self.assertNotIn("Missing required parameters", result)
 
+    def test_cantilever_with_catalog_section_does_not_require_hy_hz(self) -> None:
+        result = run_full_pipeline.invoke(
+            {
+                "scenario": "cantilever_tip_load",
+                "length_m": 5.0,
+                "n_elems": 12,
+                "E": 210e9,
+                "NU": 0.3,
+                "RHO": 7850.0,
+                "HY": None,
+                "HZ": None,
+                "A_mm2": 2010.0,
+                "IY_mm4": 8693000.0,
+                "IZ_mm4": 683100.0,
+                "JX_mm4": 50000.0,
+                "AY_mm2": 1000.0,
+                "AZ_mm2": 1000.0,
+                "FY": 1.2,
+                "length_unit": "m",
+                "force_unit": "kN",
+                "confirm": False,
+            }
+        )
+        self.assertIn("simulation has NOT been confirmed", result)
+        self.assertNotIn("Invalid value for HY", result)
+        self.assertNotIn("Invalid value for HZ", result)
+
     def test_one_shot_flow_passes_parser_hint_to_agent(self) -> None:
         agent_executor = Mock()
         agent_executor.invoke.return_value = {"output": "ok"}
@@ -81,7 +108,7 @@ class AgentPromptUnitTests(unittest.TestCase):
 
     def test_pipeline_kwargs_and_confirmation_summary_from_sheet(self) -> None:
         sheet = ParameterSheet()
-        build_state_aware_input("analyse a 4 m c30 concrete beam", sheet)
+        build_state_aware_input("analyse a simple beam 4 m c30 concrete beam", sheet)
         build_state_aware_input("12 elemens/ hight 20 cm, wedth 12 cm / fy 1.3 kn", sheet)
         kwargs = build_pipeline_kwargs_from_sheet(sheet)
         summary = build_confirmation_summary(sheet)
@@ -94,10 +121,10 @@ class AgentPromptUnitTests(unittest.TestCase):
         self.assertTrue(kwargs["confirm"])
         self.assertIn("AY_mm2", kwargs)
         self.assertIn("AZ_mm2", kwargs)
-        self.assertIn("All required parameters are ready.", summary)
-        self.assertIn("Solver properties were resolved from the selected catalog entries.", summary)
+        self.assertEqual(kwargs["scenario"], "simply_supported_midpoint_load")
+        self.assertIn("Ready to run.", summary)
         self.assertIn("- Material: C30/37", summary)
-        self.assertIn("Reply with 'yes', 'confirm', or 'run it'", summary)
+        self.assertIn("Reply: yes", summary)
 
     def test_exit_detection_handles_farewell_phrases(self) -> None:
         self.assertTrue(is_exit_input("ok bye!"))
@@ -107,8 +134,8 @@ class AgentPromptUnitTests(unittest.TestCase):
 
     def test_post_run_message_is_not_a_confirmation_prompt(self) -> None:
         message = build_post_run_message()
-        self.assertIn("already been completed", message)
-        self.assertIn("change one or more parameters", message)
+        self.assertIn("Already run", message)
+        self.assertIn("Change a parameter", message)
 
     def test_post_success_message_removes_parameter_dump(self) -> None:
         run_output = (
@@ -122,7 +149,7 @@ class AgentPromptUnitTests(unittest.TestCase):
         message = build_post_success_message(run_output)
         self.assertIn("Simulation finished successfully.", message)
         self.assertIn("Run ID: 20260408_185800_beam_6e5acb74", message)
-        self.assertIn("You can change parameters for another run, or finish the process.", message)
+        self.assertIn("Run verification too?", message)
         self.assertNotIn("Input units:", message)
         self.assertNotIn("Used parameters:", message)
 
@@ -180,7 +207,17 @@ class AgentPromptUnitTests(unittest.TestCase):
     def test_post_run_idle_message_is_short(self) -> None:
         self.assertEqual(
             build_post_run_idle_message(),
-            "You can change parameters for another run, or finish the process.",
+            "Change parameters for another run, or finish.",
+        )
+
+    def test_extract_scenario_from_plain_language(self) -> None:
+        self.assertEqual(
+            extract_scenario_from_text("simple beam 5 m beam, S355, IPE160, 12 elements, 1.2 kN load"),
+            "simply_supported_midpoint_load",
+        )
+        self.assertEqual(
+            extract_scenario_from_text("cantilever beam 3 m, S355, IPE160, 10 elements, 2 kN tip load"),
+            "cantilever_tip_load",
         )
 
 

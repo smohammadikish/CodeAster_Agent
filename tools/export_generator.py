@@ -8,7 +8,6 @@ from langchain_core.tools import tool
 
 from storage import resolve_workspace_file
 
-
 EXPORT_TEMPLATE = """# --- Code_Aster Export File ---
 P actions make_etude
 P debug nodebug

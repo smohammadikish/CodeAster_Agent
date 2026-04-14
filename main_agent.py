@@ -25,8 +25,8 @@ from langchain_openai import ChatOpenAI
 from env_loader import load_env  # noqa: E402
 from input_parser import (ParameterSheet, build_state_aware_input,
                           parse_beam_request, resolve_analysis_inputs)
-from library import (list_materials, list_sections, resolve_material_family_name,
-                     resolve_section_family_name)
+from library import (list_materials, list_sections,
+                     resolve_material_family_name, resolve_section_family_name)
 from storage import (create_run_id, ensure_base_dirs, ensure_run_dirs,
                      finalize_run, get_registered_run_paths, record_artifact,
                      record_tool_event, register_run, resolve_workspace_file,
@@ -92,6 +92,16 @@ DEFAULT_PARAMS: Dict[str, Any] = {
 }
 DEFAULT_INPUT_LENGTH_UNIT = DEFAULT_UNIT_POLICY.user_length_unit
 DEFAULT_INPUT_FORCE_UNIT = DEFAULT_UNIT_POLICY.user_force_unit
+SCENARIO_CANTILEVER_TIP_LOAD = "cantilever_tip_load"
+SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD = "simply_supported_midpoint_load"
+ALLOWED_SCENARIOS = (
+    SCENARIO_CANTILEVER_TIP_LOAD,
+    SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD,
+)
+ENABLED_SCENARIOS = {
+    SCENARIO_CANTILEVER_TIP_LOAD,
+    SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD,
+}
 
 
 # ============================================================
@@ -160,6 +170,139 @@ def get_ambiguous_dimension_message(user_input: str) -> str | None:
     return None
 
 
+def extract_scenario_from_text(user_input: str) -> str | None:
+    text = user_input.strip().lower()
+    for scenario in ALLOWED_SCENARIOS:
+        if scenario in text:
+            return scenario
+    if re.search(r"\bcantilever(?:ed)?\b", text):
+        return SCENARIO_CANTILEVER_TIP_LOAD
+    if re.search(r"\b(simply supported|simple beam|simple supported|supported beam)\b", text):
+        return SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD
+    return None
+
+
+def get_sheet_scenario(sheet: ParameterSheet) -> str | None:
+    scenario = sheet.to_dict().get("scenario")
+    return str(scenario) if scenario else None
+
+
+def get_missing_fields_for_execution(sheet: ParameterSheet) -> list[str]:
+    missing = list(sheet.missing_required_fields())
+    if not get_sheet_scenario(sheet):
+        return ["scenario", *missing]
+    return missing
+
+
+def _tool_result_indicates_failure(result: Any) -> bool:
+    text = str(result)
+    text_upper = text.upper()
+    if "ERROR" in text_upper or "âŒ" in text:
+        return True
+    if "ABNORMAL_ABORT" in text_upper or "<F>" in text_upper:
+        return True
+    exit_code_match = re.search(r"EXIT_CODE\s*=\s*(-?\d+)", text_upper)
+    if exit_code_match and int(exit_code_match.group(1)) != 0:
+        return True
+    if "FAILED" in text_upper:
+        return True
+    if "FATAL" in text_upper:
+        return True
+    if "TRACEBACK" in text_upper:
+        return True
+    return False
+
+
+def validate_cantilever_tip_load_inputs(params: dict[str, Any]) -> str | None:
+    has_resolved_section = all(
+        params.get(key) is not None
+        for key in ("A_mm2", "IY_mm4", "IZ_mm4", "JX_mm4", "AY_mm2", "AZ_mm2")
+    )
+    validators = [
+        ("length_m", params.get("length_m"), lambda value: value > 0, "a positive value in meters"),
+        (
+            "n_elems",
+            params.get("n_elems"),
+            lambda value: isinstance(value, int) and value > 0,
+            "a positive integer",
+        ),
+        ("E", params.get("E"), lambda value: value > 0, "a positive value"),
+        ("NU", params.get("NU"), lambda value: 0 < value < 0.5, "a value strictly between 0 and 0.5"),
+        ("RHO", params.get("RHO"), lambda value: value > 0, "a positive value"),
+        ("FY", params.get("FY"), lambda value: value != 0, "a non-zero value"),
+    ]
+    for field_name, value, predicate, expectation in validators:
+        if value is None or not predicate(value):
+            return f"Invalid value for {field_name}: {value}. Expected {expectation}."
+    if not has_resolved_section:
+        section_dimension_validators = [
+            ("HY", params.get("HY"), lambda value: value is not None and value > 0, "a positive value in meters"),
+            ("HZ", params.get("HZ"), lambda value: value is not None and value > 0, "a positive value in meters"),
+        ]
+        for field_name, value, predicate, expectation in section_dimension_validators:
+            if value is None or not predicate(value):
+                return f"Invalid value for {field_name}: {value}. Expected {expectation}."
+    return None
+
+
+def validate_simply_supported_midpoint_load_inputs(
+    params: dict[str, Any],
+) -> str | None:
+    n_elems = params.get("n_elems")
+    if not isinstance(n_elems, int) or n_elems <= 0:
+        return f"Invalid value for n_elems: {n_elems}. Expected a positive even integer."
+    if n_elems % 2 != 0:
+        return (
+            f"Invalid value for n_elems: {n_elems}. "
+            "Expected a positive even integer so the beam has a midpoint node."
+        )
+    return None
+
+
+def get_scenario_meaning(scenario: str | None) -> str:
+    if scenario == SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD:
+        return (
+            "simply supported beam, pin at one end, roller at the other, "
+            "with a point load at midspan"
+        )
+    return "cantilever beam, fixed at one end, with a point load at the free tip"
+
+
+def _step_result(
+    ok: bool,
+    step: str,
+    message: str,
+    raw_result: Any = "",
+    expected_file: str | None = None,
+    file_exists: bool | None = None,
+) -> dict[str, Any]:
+    return {
+        "ok": ok,
+        "step": step,
+        "message": message,
+        "expected_file": expected_file,
+        "file_exists": file_exists,
+        "raw_result": str(raw_result),
+    }
+
+
+def _pipeline_failure_message(
+    result: dict[str, Any],
+    skip_visualization: bool = False,
+) -> str:
+    lines = [
+        f"Pipeline failed at step: {result['step']}",
+        f"Reason: {result['message']}",
+    ]
+    if result.get("expected_file"):
+        lines.append(f"Expected file: {result['expected_file']}")
+    if skip_visualization:
+        lines.append(
+            "Visualization skipped because the run did not complete successfully or expected result files are missing."
+        )
+    return "\n".join(lines)
+
+
 # ============================================================
 #  Safe pipeline helper (used internally inside run_hybrid_pipeline)
 # ============================================================
@@ -179,7 +322,7 @@ def _remove_run_log_handler(handler: logging.Handler) -> None:
     handler.close()
 
 
-def safe_call(tool_func, run_id: str, expected_artifacts=None, **kwargs) -> bool:
+def safe_call(tool_func, run_id: str, expected_artifacts=None, **kwargs) -> dict[str, Any]:
     """
     Safely run a LangChain tool used in the deterministic pipeline.
 
@@ -196,6 +339,7 @@ def safe_call(tool_func, run_id: str, expected_artifacts=None, **kwargs) -> bool
     except Exception as e:
         console_print(f"Error in {tool_func.name}: {e}")
         logging.exception(f"{tool_func.name} failed")
+        step_result = _step_result(False, tool_func.name, str(e), raw_result=str(e))
         record_tool_event(
             run_id,
             tool_func.name,
@@ -205,12 +349,18 @@ def safe_call(tool_func, run_id: str, expected_artifacts=None, **kwargs) -> bool
             str(e),
             kwargs,
         )
-        return False
+        return step_result
 
     console_print(result)
 
-    if "Error" in str(result) or "❌" in str(result):
+    if _tool_result_indicates_failure(result):
         console_print(f"{tool_func.name} failed.")
+        step_result = _step_result(
+            False,
+            tool_func.name,
+            "Tool output indicates failure.",
+            raw_result=result,
+        )
         record_tool_event(
             run_id,
             tool_func.name,
@@ -220,11 +370,19 @@ def safe_call(tool_func, run_id: str, expected_artifacts=None, **kwargs) -> bool
             str(result),
             kwargs,
         )
-        return False
+        return step_result
 
     for artifact_type, artifact_stage, artifact_path in expected_artifacts:
         if not file_exists(str(artifact_path)):
             console_print(f"Expected file missing: {artifact_path}")
+            step_result = _step_result(
+                False,
+                tool_func.name,
+                "Expected output file is missing.",
+                raw_result=result,
+                expected_file=str(artifact_path),
+                file_exists=False,
+            )
             record_tool_event(
                 run_id,
                 tool_func.name,
@@ -234,10 +392,11 @@ def safe_call(tool_func, run_id: str, expected_artifacts=None, **kwargs) -> bool
                 f"Expected file missing: {artifact_path}",
                 kwargs,
             )
-            return False
+            return step_result
         record_artifact(run_id, artifact_type, artifact_stage, str(artifact_path))
 
     console_print(f"Step '{tool_func.name}' OK.\n")
+    expected_file = str(expected_artifacts[0][2]) if expected_artifacts else None
     record_tool_event(
         run_id,
         tool_func.name,
@@ -247,7 +406,14 @@ def safe_call(tool_func, run_id: str, expected_artifacts=None, **kwargs) -> bool
         str(result),
         kwargs,
     )
-    return True
+    return _step_result(
+        True,
+        tool_func.name,
+        "Step completed successfully.",
+        raw_result=result,
+        expected_file=expected_file,
+        file_exists=True if expected_file else None,
+    )
 
 
 # ============================================================
@@ -289,26 +455,30 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     logging.info(
         "run_hybrid_pipeline with internal (mm) params:\n" + dict_to_pretty_json(p)
     )
+    step_results: list[dict[str, Any]] = []
 
     # -------------------------------------------------
     # GEO generation (uses millimeters internally)
     # -------------------------------------------------
-    if not safe_call(
+    geo_result = safe_call(
         generate_geo_tool,
         "",
         expected_artifacts=[
             ("geo", "workspace", resolve_workspace_file("model.geo", "inputs"))
         ],
+        scenario=params.get("scenario", SCENARIO_CANTILEVER_TIP_LOAD),
         length_mm=p["length_m"],  # NOTE: now explicitly mm
         n_elems=p["n_elems"],
         geo_name="model.geo",
-    ):
-        return "Failed in generate_geo_tool"
+    )
+    step_results.append(geo_result)
+    if not geo_result["ok"]:
+        return _pipeline_failure_message(geo_result)
 
     # -------------------------------------------------
     # Meshing with Gmsh (still mm)
     # -------------------------------------------------
-    if not safe_call(
+    mesh_result = safe_call(
         mesh_with_gmsh_tool,
         "",
         expected_artifacts=[
@@ -316,18 +486,21 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
         ],
         geo_name="model.geo",
         med_name="model.med",
-    ):
-        return "Failed in mesh_with_gmsh_tool"
+    )
+    step_results.append(mesh_result)
+    if not mesh_result["ok"]:
+        return _pipeline_failure_message(mesh_result)
 
     # -------------------------------------------------
     # COMM generation for Code_Aster (geometry in mm)
     # -------------------------------------------------
-    if not safe_call(
+    comm_result = safe_call(
         generate_comm_tool,
         "",
         expected_artifacts=[
             ("comm", "workspace", resolve_workspace_file("model.comm", "inputs"))
         ],
+        scenario=params.get("scenario", SCENARIO_CANTILEVER_TIP_LOAD),
         med_name="model.med",
         comm_name="model.comm",
         E=p["E"],
@@ -342,13 +515,15 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
         HY_mm=p.get("HY", 120.0),
         HZ_mm=p.get("HZ", 100.0),
         FY_N=p["FY"],
-    ):
-        return "Failed in generate_comm_tool"
+    )
+    step_results.append(comm_result)
+    if not comm_result["ok"]:
+        return _pipeline_failure_message(comm_result)
 
     # -------------------------------------------------
     # EXPORT file generation
     # -------------------------------------------------
-    if not safe_call(
+    export_result = safe_call(
         generate_export_tool,
         "",
         expected_artifacts=[
@@ -358,13 +533,15 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
         export_name="model.export",
         job_name="beam_job",
         med_name="model.med",
-    ):
-        return "Failed in generate_export_tool"
+    )
+    step_results.append(export_result)
+    if not export_result["ok"]:
+        return _pipeline_failure_message(export_result)
 
     # -------------------------------------------------
     # Run Code_Aster
     # -------------------------------------------------
-    if not safe_call(
+    solver_result = safe_call(
         run_code_aster_tool,
         "",
         expected_artifacts=[
@@ -376,8 +553,10 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
             ("tab_sie", "workspace", resolve_workspace_file("tab_sie.txt", "outputs")),
         ],
         export_name="model.export",
-    ):
-        return "Failed in run_code_aster_tool"
+    )
+    step_results.append(solver_result)
+    if not solver_result["ok"]:
+        return _pipeline_failure_message(solver_result, skip_visualization=True)
 
     # -------------------------------------------------
     # Visualization phase
@@ -385,7 +564,7 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     console_print("\nVisualization phase ...")
     visualization_failures = []
 
-    if not safe_call(
+    visualize_resu_result = safe_call(
         visualize_resu_tool,
         "",
         expected_artifacts=[
@@ -393,10 +572,12 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
             ("rotation_plot", "workspace", resolve_workspace_file("beam_job_rot.png", "viz")),
         ],
         resu_name="beam_job.resu",
-    ):
+    )
+    step_results.append(visualize_resu_result)
+    if not visualize_resu_result["ok"]:
         visualization_failures.append("visualize_resu_tool")
 
-    if not safe_call(
+    visualize_stress_result = safe_call(
         visualize_stress_tool,
         "",
         expected_artifacts=[
@@ -404,32 +585,43 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
             ("moment_plot", "workspace", resolve_workspace_file("moment_diagram.png", "viz")),
         ],
         stress_name="tab_sie.txt",
-    ):
+    )
+    step_results.append(visualize_stress_result)
+    if not visualize_stress_result["ok"]:
         visualization_failures.append("visualize_stress_tool")
 
-    if not safe_call(
+    visualize_mfz_result = safe_call(
         visualize_mfz_contour_tool,
         "",
         expected_artifacts=[
             ("mfz_contour", "workspace", resolve_workspace_file("mfz_contour.png", "viz"))
         ],
         stress_name="tab_sie.txt",
-    ):
+    )
+    step_results.append(visualize_mfz_result)
+    if not visualize_mfz_result["ok"]:
         visualization_failures.append("visualize_mfz_contour_tool")
 
-    if not safe_call(
+    visualize_freebody_result = safe_call(
         visualize_freebody_tool,
         "",
         expected_artifacts=[
             ("freebody_plot", "workspace", resolve_workspace_file("freebody.png", "viz"))
         ],
+        support_type=(
+            "simply_supported"
+            if params.get("scenario") == SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD
+            else "fixed"
+        ),
         reac_name="tab_reac.txt",
-    ):
+    )
+    step_results.append(visualize_freebody_result)
+    if not visualize_freebody_result["ok"]:
         visualization_failures.append("visualize_freebody_tool")
 
     if visualization_failures:
         return (
-            "Simulation completed, but some visualization steps failed: "
+            "Simulation completed successfully, but some visualization steps failed: "
             + ", ".join(visualization_failures)
         )
 
@@ -472,6 +664,7 @@ def run_hybrid_pipeline_with_run_storage(
             "run_hybrid_pipeline_with_run_storage internal (mm) params:\n"
             + dict_to_pretty_json(p)
         )
+        step_results: list[dict[str, Any]] = []
 
         inputs = [
             ("geo", "inputs", resolve_workspace_file("model.geo", "inputs", run_id)),
@@ -496,31 +689,39 @@ def run_hybrid_pipeline_with_run_storage(
             ("freebody_plot", "viz", resolve_workspace_file("freebody.png", "viz", run_id)),
         ]
 
-        if not safe_call(
+        geo_result = safe_call(
             generate_geo_tool,
             run_id,
             expected_artifacts=[inputs[0]],
+            scenario=params.get("scenario", SCENARIO_CANTILEVER_TIP_LOAD),
             length_mm=p["length_m"],
             n_elems=p["n_elems"],
             geo_name="model.geo",
-        ):
-            finalize_run(run_id, "failed", "Failed in generate_geo_tool")
-            return f"Failed in generate_geo_tool (run_id={run_id})"
+        )
+        step_results.append(geo_result)
+        if not geo_result["ok"]:
+            failure_message = _pipeline_failure_message(geo_result)
+            finalize_run(run_id, "failed", failure_message)
+            return f"{failure_message}\nRun ID: {run_id}\nRun folder: {run_paths.root.resolve()}"
 
-        if not safe_call(
+        mesh_result = safe_call(
             mesh_with_gmsh_tool,
             run_id,
             expected_artifacts=[inputs[1]],
             geo_name="model.geo",
             med_name="model.med",
-        ):
-            finalize_run(run_id, "failed", "Failed in mesh_with_gmsh_tool")
-            return f"Failed in mesh_with_gmsh_tool (run_id={run_id})"
+        )
+        step_results.append(mesh_result)
+        if not mesh_result["ok"]:
+            failure_message = _pipeline_failure_message(mesh_result)
+            finalize_run(run_id, "failed", failure_message)
+            return f"{failure_message}\nRun ID: {run_id}\nRun folder: {run_paths.root.resolve()}"
 
-        if not safe_call(
+        comm_result = safe_call(
             generate_comm_tool,
             run_id,
             expected_artifacts=[inputs[2]],
+            scenario=params.get("scenario", SCENARIO_CANTILEVER_TIP_LOAD),
             med_name="model.med",
             comm_name="model.comm",
             E=p["E"],
@@ -535,11 +736,14 @@ def run_hybrid_pipeline_with_run_storage(
             HY_mm=p.get("HY", 120.0),
             HZ_mm=p.get("HZ", 100.0),
             FY_N=p["FY"],
-        ):
-            finalize_run(run_id, "failed", "Failed in generate_comm_tool")
-            return f"Failed in generate_comm_tool (run_id={run_id})"
+        )
+        step_results.append(comm_result)
+        if not comm_result["ok"]:
+            failure_message = _pipeline_failure_message(comm_result)
+            finalize_run(run_id, "failed", failure_message)
+            return f"{failure_message}\nRun ID: {run_id}\nRun folder: {run_paths.root.resolve()}"
 
-        if not safe_call(
+        export_result = safe_call(
             generate_export_tool,
             run_id,
             expected_artifacts=[inputs[3]],
@@ -547,52 +751,74 @@ def run_hybrid_pipeline_with_run_storage(
             export_name="model.export",
             job_name="beam_job",
             med_name="model.med",
-        ):
-            finalize_run(run_id, "failed", "Failed in generate_export_tool")
-            return f"Failed in generate_export_tool (run_id={run_id})"
+        )
+        step_results.append(export_result)
+        if not export_result["ok"]:
+            failure_message = _pipeline_failure_message(export_result)
+            finalize_run(run_id, "failed", failure_message)
+            return f"{failure_message}\nRun ID: {run_id}\nRun folder: {run_paths.root.resolve()}"
 
-        if not safe_call(
+        solver_result = safe_call(
             run_code_aster_tool,
             run_id,
             expected_artifacts=outputs,
             export_name="model.export",
-        ):
-            finalize_run(run_id, "failed", "Failed in run_code_aster_tool")
-            return f"Failed in run_code_aster_tool (run_id={run_id})"
+        )
+        step_results.append(solver_result)
+        if not solver_result["ok"]:
+            failure_message = _pipeline_failure_message(
+                solver_result,
+                skip_visualization=True,
+            )
+            finalize_run(run_id, "failed", failure_message)
+            return f"{failure_message}\nRun ID: {run_id}\nRun folder: {run_paths.root.resolve()}"
 
         console_print("\nVisualization phase ...")
         visualization_failures = []
 
-        if not safe_call(
+        visualize_resu_result = safe_call(
             visualize_resu_tool,
             run_id,
             expected_artifacts=viz[0:2],
             resu_name="beam_job.resu",
-        ):
+        )
+        step_results.append(visualize_resu_result)
+        if not visualize_resu_result["ok"]:
             visualization_failures.append("visualize_resu_tool")
 
-        if not safe_call(
+        visualize_stress_result = safe_call(
             visualize_stress_tool,
             run_id,
             expected_artifacts=viz[2:4],
             stress_name="tab_sie.txt",
-        ):
+        )
+        step_results.append(visualize_stress_result)
+        if not visualize_stress_result["ok"]:
             visualization_failures.append("visualize_stress_tool")
 
-        if not safe_call(
+        visualize_mfz_result = safe_call(
             visualize_mfz_contour_tool,
             run_id,
             expected_artifacts=[viz[4]],
             stress_name="tab_sie.txt",
-        ):
+        )
+        step_results.append(visualize_mfz_result)
+        if not visualize_mfz_result["ok"]:
             visualization_failures.append("visualize_mfz_contour_tool")
 
-        if not safe_call(
+        visualize_freebody_result = safe_call(
             visualize_freebody_tool,
             run_id,
             expected_artifacts=[viz[5]],
+            support_type=(
+                "simply_supported"
+                if params.get("scenario") == SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD
+                else "fixed"
+            ),
             reac_name="tab_reac.txt",
-        ):
+        )
+        step_results.append(visualize_freebody_result)
+        if not visualize_freebody_result["ok"]:
             visualization_failures.append("visualize_freebody_tool")
 
         meta_path = resolve_workspace_file("run.json", "meta", run_id)
@@ -625,7 +851,7 @@ def run_hybrid_pipeline_with_run_storage(
                 "Visualization failures: " + ", ".join(visualization_failures),
             )
             return (
-                "Simulation completed, but some visualization steps failed: "
+                "Simulation completed successfully, but some visualization steps failed: "
                 + ", ".join(visualization_failures)
                 + f"\nRun ID: {run_id}\nRun folder: {run_paths.root.resolve()}"
             )
@@ -651,6 +877,7 @@ def run_hybrid_pipeline_with_run_storage(
 
 @tool
 def run_full_pipeline(
+    scenario: str = None,
     length_m: float = None,
     n_elems: int = None,
     E: float = None,
@@ -690,6 +917,22 @@ def run_full_pipeline(
     - If confirm=False → return a message asking the agent to request confirmation.
     - If all parameters exist AND confirm=True → run the deterministic pipeline.
     """
+
+    if scenario is None:
+        return (
+            "Missing required parameter: scenario.\n"
+            "Please ask the user to choose one of these scenarios:\n"
+            f"- {SCENARIO_CANTILEVER_TIP_LOAD}\n"
+            f"- {SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD}"
+        )
+
+    if scenario not in ALLOWED_SCENARIOS:
+        return (
+            f"Invalid scenario '{scenario}'.\n"
+            "Allowed scenario names are:\n"
+            f"- {SCENARIO_CANTILEVER_TIP_LOAD}\n"
+            f"- {SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD}"
+        )
 
     # 1) Check for missing required parameters
     params_raw = {
@@ -733,6 +976,36 @@ def run_full_pipeline(
             "or explicitly approve using default values."
         )
 
+    if scenario == SCENARIO_CANTILEVER_TIP_LOAD:
+        validation_message = validate_cantilever_tip_load_inputs(
+            {
+                "length_m": length_m,
+                "n_elems": n_elems,
+                "HY": HY,
+                "HZ": HZ,
+                "A_mm2": A_mm2,
+                "IY_mm4": IY_mm4,
+                "IZ_mm4": IZ_mm4,
+                "JX_mm4": JX_mm4,
+                "AY_mm2": AY_mm2,
+                "AZ_mm2": AZ_mm2,
+                "E": E,
+                "NU": NU,
+                "RHO": RHO,
+                "FY": FY,
+            }
+        )
+        if validation_message:
+            return validation_message
+    elif scenario == SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD:
+        validation_message = validate_simply_supported_midpoint_load_inputs(
+            {
+                "n_elems": n_elems,
+            }
+        )
+        if validation_message:
+            return validation_message
+
     # 2) Check for confirmation flag
     if confirm is False:
         return (
@@ -759,8 +1032,9 @@ def run_full_pipeline(
             "FY": FY,
         }
     )
+    params["scenario"] = scenario
     logging.info(
-        "run_full_pipeline confirmed with params (user units):\n"
+        f"run_full_pipeline confirmed for scenario={scenario} with params (user units):\n"
         + dict_to_pretty_json(params)
     )
 
@@ -774,6 +1048,7 @@ def run_full_pipeline(
 
     return (
         f"{summary}\n\n"
+        f"Scenario: {scenario}\n"
         f"Input units: length={length_unit}, HY={hy_unit}, HZ={hz_unit}, force={force_unit}\n"
         "Used parameters:\n"
         f"{dict_to_pretty_json(params)}"
@@ -787,6 +1062,20 @@ def run_full_pipeline(
 
 def build_system_prompt() -> str:
     return """You are a mechanical simulation assistant specialized in beam analysis using Code_Aster and Gmsh. You support multi-step conversations where the user incrementally provides beam geometry, material properties, cross-section definitions, and loads.
+
+============================================================
+SCENARIOS (CRITICAL)
+============================================================
+- You support exactly these two scenario names:
+  - cantilever_tip_load
+  - simply_supported_midpoint_load
+- Scenario meanings:
+  - cantilever_tip_load = cantilever beam, fixed at one end, point load at the free tip
+  - simply_supported_midpoint_load = simply supported beam, pin at one end, roller at the other, point load at midspan
+- You must determine the scenario first before attempting to run anything.
+- If the scenario is missing, explicitly ask the user to choose one of those two exact scenario names.
+- Never invent a scenario.
+- Both supported scenarios can proceed through the execution path in the current version.
 
 ============================================================
 UNITS CONVENTION (CRITICAL)
@@ -837,13 +1126,15 @@ RESPONSE STYLE
    - If the user selects only a family such as steel, aluminum, concrete, or wood, list the actual entries available in that family.
 
 2) Do not call run_full_pipeline until all required parameters are known:
+   - scenario
    - length_m  (beam length)
    - n_elems   (integer)
    - E, NU, RHO or a resolvable material name
-   - A, IY, IZ, JX, AY, AZ or a resolvable section definition
+   - HY and HZ for the rectangular section, unless an equivalent section definition has already been resolved
    - FY        (load)
 
 3) When calling run_full_pipeline, pass units explicitly per field:
+   - scenario
    - length_unit for length_m
    - hy_unit for HY
    - hz_unit for HZ
@@ -876,6 +1167,7 @@ RESPONSE STYLE
 7) When all parameters are known:
    - Summarize them clearly and preserve the user's units.
    - Keep the summary short and user-facing.
+   - For cantilever_tip_load, make the engineering setup explicit: cantilever beam, fixed at one end, point load at the free tip.
    - If a concrete material was resolved by formula instead of the catalog table, mark it with '(calculated by Eurocode formula)'.
    - Then ask:
        "Do you confirm running the simulation with these values?"
@@ -932,10 +1224,7 @@ def is_exit_input(user_input: str) -> bool:
 
 
 def build_post_run_message() -> str:
-    return (
-        "The simulation has already been completed for the current parameter sheet.\n"
-        "If you want another run, change one or more parameters or start a new analysis."
-    )
+    return "Already run for these inputs. Change a parameter for a new run."
 
 
 def build_post_success_message(run_output: str) -> str:
@@ -947,12 +1236,19 @@ def build_post_success_message(run_output: str) -> str:
         kept.append(line)
     if not kept:
         kept = ["Simulation finished successfully."]
-    kept.append("Do you want me to run verification for this run as well?")
+    kept.append("Run verification too?")
     return "\n".join(kept)
 
 
+def is_successful_run_output(run_output: str) -> bool:
+    text = str(run_output)
+    return "Simulation finished successfully." in text or (
+        "Simulation completed successfully, but some visualization steps failed:" in text
+    )
+
+
 def build_post_run_idle_message() -> str:
-    return "You can change parameters for another run, or finish the process."
+    return "Change parameters for another run, or finish."
 
 
 def is_negative_response(user_input: str) -> bool:
@@ -1014,7 +1310,7 @@ def run_verification_for_run(run_id: str) -> str:
     return (
         f"{status_line}\n"
         f"Run ID: {run_id}\n"
-        f"Verification folder: {verification_dir.resolve()}\n"
+        f"Verification: {verification_dir.resolve()}\n"
         f"Manual: {(verification_dir / 'manual' / 'result.json').resolve()}\n"
         f"OpenSees: {(verification_dir / 'opensees' / 'results.json').resolve()}\n"
         f"Comparison: {(verification_dir / 'comparison' / 'comparison_report.txt').resolve()}"
@@ -1028,6 +1324,7 @@ def get_sheet_signature(sheet: ParameterSheet) -> str:
 def build_confirmation_summary(sheet: ParameterSheet) -> str:
     resolution = resolve_analysis_inputs(sheet.to_dict())
     values = resolution["resolved"]
+    scenario = get_sheet_scenario(sheet)
     material = values.get("resolved_material")
     section = values.get("resolved_section")
     material_suffix = (
@@ -1048,26 +1345,30 @@ def build_confirmation_summary(sheet: ParameterSheet) -> str:
         else ""
     )
     lines = [
-        "All required parameters are ready.",
-        f"- Length: {values['length_m']} {values.get('length_unit', DEFAULT_INPUT_LENGTH_UNIT)}",
-        f"- Elements: {values['n_elems']}",
-        f"- Load FY: {values['FY']} {values.get('force_unit', DEFAULT_INPUT_FORCE_UNIT)}",
+        "Ready to run.",
+        f"- Scenario: {scenario}",
+        f"- Length: {values['length_m']} {values.get('length_unit', DEFAULT_INPUT_LENGTH_UNIT)} | Elements: {values['n_elems']}",
+        f"- Load: {values['FY']} {values.get('force_unit', DEFAULT_INPUT_FORCE_UNIT)}",
     ]
+    if values.get("HY") is not None or values.get("HZ") is not None:
+        lines.append(
+            f"- HY/HZ: {values.get('HY')} {values.get('hy_unit', DEFAULT_INPUT_LENGTH_UNIT)} / "
+            f"{values.get('HZ')} {values.get('hz_unit', DEFAULT_INPUT_LENGTH_UNIT)}"
+        )
     if material_line:
         lines.append(material_line)
     if section_line:
         lines.append(section_line)
-    if material or section:
-        lines.append("- Solver properties were resolved from the selected catalog entries.")
     if resolution["notes"]:
         lines.extend(f"- Note: {note}" for note in resolution["notes"])
-    lines.append("Reply with 'yes', 'confirm', or 'run it' to start the simulation.")
+    lines.append("Reply: yes")
     return "\n".join(lines)
 
 
 def build_pipeline_kwargs_from_sheet(sheet: ParameterSheet) -> dict[str, Any]:
     values = resolve_analysis_inputs(sheet.to_dict())["resolved"]
     return {
+        "scenario": get_sheet_scenario(sheet),
         "length_m": values["length_m"],
         "n_elems": values["n_elems"],
         "E": values["E"],
@@ -1216,9 +1517,15 @@ def run_agent_one_shot(
     - The system converts them internally for the tools.
     """
     console_print("\nAGENT MODE (one-shot with tools)\n")
+    console_print(
+        "Supported scenarios: "
+        f"{SCENARIO_CANTILEVER_TIP_LOAD}, {SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD}."
+    )
+    console_print("Both supported scenarios can proceed through execution.")
+    console_print("All geometric dimensions must be provided in meters.")
     console_print("Describe the beam with the values you know, and include units for each dimension or load.")
     console_print(
-        "   Examples: 5 m beam with 1.2 kN load | 5 m beam, S355, IPE160, 12 elements, 1.2 kN tip load.\n"
+        "   Examples: scenario cantilever_tip_load, 5 m beam, S355, IPE160, 12 elements, 1.2 kN tip load.\n"
     )
 
     ambiguous_message = get_ambiguous_dimension_message(user_input)
@@ -1229,7 +1536,12 @@ def run_agent_one_shot(
 
     try:
         sheet = ParameterSheet()
-        state_input = build_state_aware_input(user_input, sheet, llm=extractor_llm)
+        turn_update = sheet.update_from_text(user_input, llm=extractor_llm)
+        state_input = build_state_aware_input(
+            user_input,
+            sheet,
+            turn_update=turn_update,
+        )
         result = agent_executor.invoke({"input": state_input})
     except Exception as e:
         console_print("\nAgent error:\n")
@@ -1255,9 +1567,15 @@ def run_agent_chat(agent_executor: AgentExecutor, extractor_llm: Any | None = No
     console_print(
         "Type 'exit', 'quit', 'stop', 'end', 'finish', or 'cancel' to terminate.\n"
     )
+    console_print(
+        "Supported scenarios: "
+        f"{SCENARIO_CANTILEVER_TIP_LOAD}, {SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD}."
+    )
+    console_print("Both supported scenarios can proceed through execution.")
+    console_print("All geometric dimensions must be provided in meters.")
     console_print("Describe the beam with the values you know, and include units for each dimension or load.")
     console_print(
-        "   Examples: 5 m beam with 1.2 kN load | 5 m beam, S355, IPE160, 12 elements, 1.2 kN tip load.\n"
+        "   Examples: scenario cantilever_tip_load, 5 m beam, S355, IPE160, 12 elements, 1.2 kN tip load.\n"
     )
 
     chat_history: List[BaseMessage] = []
@@ -1287,10 +1605,16 @@ def run_agent_chat(agent_executor: AgentExecutor, extractor_llm: Any | None = No
 
         # Run the agent with history
         try:
-            parsed_update = parse_beam_request(user_input)
-            state_input = build_state_aware_input(
-                user_input, parameter_sheet, llm=extractor_llm
+            turn_update = parameter_sheet.update_from_text(
+                user_input,
+                llm=extractor_llm,
             )
+            state_input = build_state_aware_input(
+                user_input,
+                parameter_sheet,
+                turn_update=turn_update,
+            )
+            parsed_update = turn_update.get("applied_updates", {})
             current_signature = get_sheet_signature(parameter_sheet)
             if last_executed_signature is not None and current_signature != last_executed_signature:
                 simulation_executed = False
@@ -1345,24 +1669,43 @@ def run_agent_chat(agent_executor: AgentExecutor, extractor_llm: Any | None = No
                 chat_history.append(AIMessage(content=output_str))
                 continue
 
-            if not parameter_sheet.missing_required_fields():
+            missing_fields = get_missing_fields_for_execution(parameter_sheet)
+
+            if not missing_fields:
                 if is_confirmation_input(user_input):
                     run_output = str(
                         run_full_pipeline.invoke(
                             build_pipeline_kwargs_from_sheet(parameter_sheet)
                         )
                     ).strip()
-                    last_run_id, _ = extract_run_id_and_folder(run_output)
-                    output_str = build_post_success_message(run_output)
-                    simulation_executed = True
-                    last_executed_signature = get_sheet_signature(parameter_sheet)
-                    verification_prompt_pending = True
+                    if is_successful_run_output(run_output):
+                        last_run_id, _ = extract_run_id_and_folder(run_output)
+                        output_str = build_post_success_message(run_output)
+                        simulation_executed = True
+                        last_executed_signature = get_sheet_signature(parameter_sheet)
+                        verification_prompt_pending = True
+                    else:
+                        output_str = run_output
+                        simulation_executed = False
+                        verification_prompt_pending = False
                     console_print("\nAgent:\n" + output_str + "\n")
                     chat_history.append(HumanMessage(content=user_input))
                     chat_history.append(AIMessage(content=output_str))
                     continue
 
                 output_str = build_confirmation_summary(parameter_sheet)
+                console_print("\nAgent:\n" + output_str + "\n")
+                chat_history.append(HumanMessage(content=user_input))
+                chat_history.append(AIMessage(content=output_str))
+                continue
+
+            scenario = get_sheet_scenario(parameter_sheet)
+            if scenario is None:
+                output_str = (
+                    "Please choose the scenario first:\n"
+                    f"- {SCENARIO_CANTILEVER_TIP_LOAD}\n"
+                    f"- {SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD}"
+                )
                 console_print("\nAgent:\n" + output_str + "\n")
                 chat_history.append(HumanMessage(content=user_input))
                 chat_history.append(AIMessage(content=output_str))

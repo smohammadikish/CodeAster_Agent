@@ -4,41 +4,12 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from library import (resolve_material_family_name, resolve_section_family_name,
-                     search_material, search_section)
-
 from .extraction import extract_state_update
 from .parsing import parse_beam_request
 from .resolution import resolve_analysis_inputs
 
-
 # This module keeps the running conversation state and builds helper text
 # that is attached to the LLM input.
-
-
-def _is_material_family_only(value: str) -> bool:
-    try:
-        resolve_material_family_name(value)
-    except Exception:
-        return False
-    try:
-        search_material(value)
-        return False
-    except Exception:
-        return True
-
-
-def _is_section_family_only(value: str) -> bool:
-    try:
-        resolve_section_family_name(value)
-    except Exception:
-        return False
-    try:
-        search_section(value)
-        return False
-    except Exception:
-        return True
-
 
 @dataclass
 class ParameterSheet:
@@ -47,47 +18,10 @@ class ParameterSheet:
     values: dict[str, Any] = field(default_factory=dict)
     last_user_intent: str = "unknown"
 
-    def _normalize_contextual_hints(
-        self, updates: dict[str, Any], previous_values: dict[str, Any]
-    ) -> dict[str, Any]:
-        normalized = dict(updates)
-        previous_resolution = resolve_analysis_inputs(previous_values)
-        previous_resolved = previous_resolution["resolved"]
-        material_fixed = previous_resolved.get("resolved_material") is not None
-        section_fixed = previous_resolved.get("resolved_section") is not None
-        section_missing = "section_definition" in previous_resolution["missing"]
-        material_missing = any(
-            key in previous_resolution["missing"] for key in ("E", "NU", "RHO")
-        )
-
-        material_hint = normalized.get("material_hint")
-        if (
-            isinstance(material_hint, str)
-            and material_fixed
-            and not section_fixed
-            and section_missing
-            and "section_hint" not in normalized
-            and _is_section_family_only(material_hint)
-        ):
-            normalized["section_hint"] = material_hint
-            normalized.pop("material_hint", None)
-
-        section_hint = normalized.get("section_hint")
-        if (
-            isinstance(section_hint, str)
-            and section_fixed
-            and not material_fixed
-            and material_missing
-            and "material_hint" not in normalized
-            and _is_material_family_only(section_hint)
-        ):
-            normalized["material_hint"] = section_hint
-            normalized.pop("section_hint", None)
-
-        return normalized
-
     def merge_update_payload(self, payload: dict[str, Any]) -> None:
         updates = payload.get("updates", {})
+        if "scenario" in updates:
+            self.values["scenario"] = updates["scenario"]
         if "length" in updates:
             self.values["length_m"] = updates["length"]["value"]
             self.values["length_unit"] = updates["length"]["unit"]
@@ -123,21 +57,46 @@ class ParameterSheet:
                 self.values[scalar] = updates[scalar]
         self.last_user_intent = payload.get("user_intent", self.last_user_intent)
 
+    def _apply_fallback_updates(self, fallback_updates: dict[str, Any]) -> dict[str, Any]:
+        applied: dict[str, Any] = {}
+        for key, value in fallback_updates.items():
+            if self.values.get(key) != value:
+                self.values[key] = value
+                applied[key] = value
+        return applied
+
     def update_from_text(self, text: str, llm: Any | None = None) -> dict[str, Any]:
-        previous_values = self.to_dict()
-        parsed = self._normalize_contextual_hints(parse_beam_request(text), previous_values)
-        self.values.update(parsed)
+        llm_payload: dict[str, Any] | None = None
+        llm_updates: dict[str, Any] = {}
         if llm is not None:
             try:
-                payload = extract_state_update(llm, text, self.to_dict())
-                payload["updates"] = self._normalize_contextual_hints(
-                    payload.get("updates", {}),
-                    previous_values,
-                )
-                self.merge_update_payload(payload)
+                llm_payload = extract_state_update(llm, text, self.to_dict())
+                llm_updates = dict(llm_payload.get("updates", {}))
+                self.merge_update_payload(llm_payload)
             except Exception:
-                pass
-        return parsed
+                llm_payload = None
+                llm_updates = {}
+
+        fallback_updates = parse_beam_request(text)
+        fallback_applied = self._apply_fallback_updates(
+            {
+                key: value
+                for key, value in fallback_updates.items()
+                if key not in llm_updates
+            }
+        )
+
+        return {
+            "llm_payload": llm_payload,
+            "llm_updates": llm_updates,
+            "fallback_updates": fallback_updates,
+            "applied_updates": {**llm_updates, **fallback_applied},
+            "user_intent": (
+                llm_payload.get("user_intent", self.last_user_intent)
+                if llm_payload
+                else self.last_user_intent
+            ),
+        }
 
     def missing_required_fields(self) -> list[str]:
         return resolve_analysis_inputs(self.values)["missing"]
@@ -237,10 +196,15 @@ def build_parser_hint(text: str, parsed: dict[str, Any] | None = None) -> str:
     return text + hint
 
 
-def build_state_aware_input(text: str, sheet: ParameterSheet, llm: Any | None = None) -> str:
-    parsed = sheet.update_from_text(text, llm=llm)
+def build_state_aware_input(
+    text: str,
+    sheet: ParameterSheet,
+    llm: Any | None = None,
+    turn_update: dict[str, Any] | None = None,
+) -> str:
+    update = turn_update if turn_update is not None else sheet.update_from_text(text, llm=llm)
     state_block = sheet.build_hint_block()
-    parser_hint = build_parser_hint(text, parsed)
+    parser_hint = build_parser_hint(text, update.get("fallback_updates"))
     if not state_block:
         return parser_hint
     return parser_hint + "\n\n" + state_block

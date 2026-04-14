@@ -11,7 +11,8 @@ import numpy as np
 from langchain_core.tools import tool  # ✅ Updated for LangChain 1.x
 
 from storage import resolve_workspace_file
-from units import DEFAULT_UNIT_POLICY, convert_force, convert_length, convert_moment
+from units import (DEFAULT_UNIT_POLICY, convert_force, convert_length,
+                   convert_moment)
 
 
 # ============================================================
@@ -386,7 +387,7 @@ def _read_reactions(reac_path):
 #  2. Parse beam length from .geo file
 # ------------------------------------------------------------
 def _read_beam_length(geo_path):
-    """Read beam length from Point(1) and Point(2) in .geo file."""
+    """Read beam length from the minimum and maximum x-coordinates in the .geo file."""
     if not os.path.exists(geo_path):
         return None
 
@@ -400,10 +401,9 @@ def _read_beam_length(geo_path):
                 xyz = [float(v.strip()) for v in m.group(2).split(",")]
                 coords[pid] = xyz
 
-    if 1 in coords and 2 in coords:
-        x1, y1, z1 = coords[1]
-        x2, y2, z2 = coords[2]
-        return np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2 + (z2 - z1) ** 2)
+    if coords:
+        xs = [xyz[0] for xyz in coords.values()]
+        return max(xs) - min(xs)
     return None
 
 
@@ -451,8 +451,10 @@ def _read_loads(comm_path: str):
                 )
                 if fy_match:
                     val = float(fy_match.group(1))
+                    group_match = re.search(r"GROUP_NO\s*=\s*\('([^']+)'\s*,?\)", block_text)
+                    group_name = group_match.group(1) if group_match else ""
                     if inside_force_nodale:
-                        loads.append({"type": "point", "Fy": val})
+                        loads.append({"type": "point", "Fy": val, "group": group_name})
                     elif inside_force_poutre:
                         loads.append({"type": "uniform", "qy": val})
                 inside_force_nodale = False
@@ -521,13 +523,14 @@ def _draw_load(ax, beam_length, loads):
     for load in loads:
         if load["type"] == "point":
             Fy = load["Fy"]
+            load_x = beam_length / 2 if load.get("group") == "MID" else beam_length
             display_force = convert_force(
                 Fy,
                 DEFAULT_UNIT_POLICY.solver_force_unit,
                 DEFAULT_UNIT_POLICY.visualization_force_unit,
             )
             ax.arrow(
-                beam_length,
+                load_x,
                 0.0,
                 0,
                 -0.25,
@@ -539,7 +542,7 @@ def _draw_load(ax, beam_length, loads):
                 length_includes_head=True,
             )
             ax.text(
-                beam_length - 0.05,
+                load_x - 0.05,
                 -0.35,
                 f"{display_force:.1f} {DEFAULT_UNIT_POLICY.visualization_force_unit}",
                 color="tab:red",
@@ -632,8 +635,12 @@ def visualize_freebody_tool(
     # Draw beam axis (in meters)
     ax.plot([0, beam_length], [0, 0], color="black", lw=3, solid_capstyle="round")
 
-    # Draw support at x=0
-    _draw_support(ax, x0=0.0, y0=0.0, support_type=support_type)
+    # Draw supports
+    if support_type == "simply_supported":
+        _draw_support(ax, x0=0.0, y0=0.0, support_type="pinned")
+        _draw_support(ax, x0=beam_length, y0=0.0, support_type="roller")
+    else:
+        _draw_support(ax, x0=0.0, y0=0.0, support_type=support_type)
 
     # Draw reaction Fy
     Fy = reac["Fy"]

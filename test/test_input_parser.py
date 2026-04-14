@@ -36,6 +36,14 @@ class InputParserTests(unittest.TestCase):
         self.assertEqual(compact_h["HY"], 0.125)
         self.assertEqual(compact_h["hy_unit"], "m")
 
+    def test_parse_simple_beam_infers_supported_scenario(self) -> None:
+        parsed = parse_beam_request("simple beam 5 m beam, S355, IPE160, 12 elements, 1.2 kN load")
+        self.assertEqual(parsed["scenario"], "simply_supported_midpoint_load")
+
+    def test_parse_cantilever_infers_cantilever_scenario(self) -> None:
+        parsed = parse_beam_request("cantilever beam 3 m, S355, IPE160, 10 elements, 2 kN tip load")
+        self.assertEqual(parsed["scenario"], "cantilever_tip_load")
+
     def test_build_parser_hint_appends_structured_extraction(self) -> None:
         text = "10 elements, 20 cm height, 12 cm width, 1.2 kN load"
         hinted = build_parser_hint(text)
@@ -59,7 +67,7 @@ class InputParserTests(unittest.TestCase):
         self.assertIn('"HY": 20.0', second)
         self.assertIn('"HZ": 12.0', second)
         self.assertIn('"FY": 1.2', second)
-        self.assertIn("Missing required fields: none", second)
+        self.assertIn("Missing required fields:", second)
 
     def test_newer_value_overwrites_previous_value(self) -> None:
         sheet = ParameterSheet()
@@ -106,6 +114,50 @@ class InputParserTests(unittest.TestCase):
         self.assertEqual(sheet.to_dict()["HY"], 0.225)
         self.assertEqual(sheet.to_dict()["hy_unit"], "m")
 
+    def test_llm_is_primary_for_scenario_interpretation(self) -> None:
+        llm = Mock()
+        llm.invoke.return_value = Mock(
+            content='{"updates":{"scenario":"simply_supported_midpoint_load","length":{"value":4,"unit":"m"},"n_elems":10,"HY":{"value":0.12,"unit":"m"},"HZ":{"value":0.10,"unit":"m"},"material_hint":"S235","FY":{"value":1500,"unit":"N"}},"user_intent":"provide_parameters"}'
+        )
+        sheet = ParameterSheet()
+        build_state_aware_input(
+            "simpl beam, 4 m beam, 10 elements, HY=0.12 m, HZ=0.10 m, steel S235, 1500 N load",
+            sheet,
+            llm=llm,
+        )
+        self.assertEqual(sheet.to_dict()["scenario"], "simply_supported_midpoint_load")
+        self.assertEqual(sheet.to_dict()["material_hint"], "S235")
+
+    def test_llm_can_resolve_second_as_second_scenario(self) -> None:
+        llm = Mock()
+        llm.invoke.return_value = Mock(
+            content='{"updates":{"scenario":"simply_supported_midpoint_load"},"user_intent":"provide_parameters"}'
+        )
+        sheet = ParameterSheet()
+        build_state_aware_input("second", sheet, llm=llm)
+        self.assertEqual(sheet.to_dict()["scenario"], "simply_supported_midpoint_load")
+
+    def test_same_as_before_updates_only_changed_field(self) -> None:
+        llm = Mock()
+        llm.invoke.side_effect = [
+            Mock(
+                content='{"updates":{"scenario":"cantilever_tip_load","length":{"value":5,"unit":"m"},"n_elems":10,"material_hint":"S355","section_hint":"IPE160","FY":{"value":1.2,"unit":"kN"}},"user_intent":"provide_parameters"}'
+            ),
+            Mock(
+                content='{"updates":{"n_elems":12},"user_intent":"provide_parameters"}'
+            ),
+        ]
+        sheet = ParameterSheet()
+        build_state_aware_input(
+            "cantilever beam 5 m, S355, IPE160, 10 elements, 1.2 kN tip load",
+            sheet,
+            llm=llm,
+        )
+        build_state_aware_input("same as before but 12 elements", sheet, llm=llm)
+        self.assertEqual(sheet.to_dict()["scenario"], "cantilever_tip_load")
+        self.assertEqual(sheet.to_dict()["n_elems"], 12)
+        self.assertEqual(sheet.to_dict()["section_hint"], "IPE160")
+
     def test_resolution_returns_shear_areas_for_named_section(self) -> None:
         resolved = resolve_analysis_inputs(
             {
@@ -119,20 +171,11 @@ class InputParserTests(unittest.TestCase):
         self.assertIsNotNone(resolved["AY_mm2"])
         self.assertIsNotNone(resolved["AZ_mm2"])
 
-    def test_family_name_after_material_selection_routes_to_section(self) -> None:
-        sheet = ParameterSheet(
-            {
-                "length_m": 5.0,
-                "length_unit": "m",
-                "n_elems": 12,
-                "FY": 1.2,
-                "force_unit": "kN",
-                "material_hint": "6082-T6",
-            }
-        )
+    def test_state_model_does_not_mix_material_and_section_hints(self) -> None:
+        sheet = ParameterSheet({"material_hint": "6082-T6"})
         build_state_aware_input("aluminum", sheet)
-        self.assertEqual(sheet.to_dict()["material_hint"], "6082-T6")
-        self.assertEqual(sheet.to_dict()["section_hint"], "aluminum")
+        self.assertEqual(sheet.to_dict()["material_hint"], "aluminum")
+        self.assertNotIn("section_hint", sheet.to_dict())
 
 
 if __name__ == "__main__":

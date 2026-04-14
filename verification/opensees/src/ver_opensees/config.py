@@ -5,13 +5,8 @@ import os
 from pathlib import Path
 
 from ver_opensees.code_aster_parser import load_code_aster_input
-from ver_opensees.models import (
-    BeamInput,
-    BeamMaterial,
-    BeamSection,
-    InputSource,
-    PointLoad,
-)
+from ver_opensees.models import (BeamInput, BeamMaterial, BeamSection,
+                                 InputSource, PointLoad)
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_WORKSPACE = REPO_ROOT / "workspace"

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 
-
 # This module reads direct values from the latest user message.
 # It handles simple regex-based extraction for geometry, loads, and hints.
 
@@ -71,8 +70,24 @@ def _find_section_shape(text: str) -> str | None:
     return None
 
 
+def _find_scenario(text: str) -> str | None:
+    if re.search(r"\bcantilever(?:ed)?\b", text, flags=re.I):
+        return "cantilever_tip_load"
+    if re.search(
+        r"\b(?:simply supported|simple beam|simple supported|supported beam)\b",
+        text,
+        flags=re.I,
+    ):
+        return "simply_supported_midpoint_load"
+    return None
+
+
 def parse_beam_request(text: str) -> dict[str, object]:
     parsed: dict[str, object] = {}
+
+    scenario = _find_scenario(text)
+    if scenario:
+        parsed["scenario"] = scenario
 
     elem_match = re.search(
         r"\b(?P<n>\d+)\s*(?:elements?|elems?|elemens?)\b", text, flags=re.I

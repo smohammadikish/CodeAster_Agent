@@ -6,7 +6,6 @@ from typing import Any
 from library import build_parametric_section, search_material, search_section
 from units import convert_length
 
-
 # This module turns user-facing hints into final analysis inputs.
 # It resolves materials, sections, and parametric shapes.
 
