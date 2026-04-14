@@ -1,0 +1,48 @@
+Structural Analysis Report - Simply Supported Beam
+
+1. Introduction
+This report presents the structural analysis of a simply supported beam subjected to a concentrated load at midspan.
+
+2. Problem Definition
+Beam length: L = {{ beam.length }} m
+Load at midspan: P = ______ N
+
+3. Static Equilibrium Equations
+Sum of vertical forces: SFy = 0
+Sum of moments about A: SMA = 0
+
+4. Support Reactions
+RA = RB = P / 2
+RA = {{ supports_by_name.A.reactions.Ry }} N
+RB = {{ supports_by_name.B.reactions.Ry }} N
+
+5. Maximum Bending Moment
+Mmax = (P x L) / 4
+Mmax = {{ extrema.bending_moment.max }} Nm
+
+6. Beam Deflection
+dmax = (P x L^3) / (48 x E x I)
+E = ______ Pa
+I = ______ m^4
+dmax = {{ displacements.midspan.uy }} m
+
+7. Geometric Properties
+Length L = {{ beam.length }} m
+Width b = ______ m
+Height h = ______ m
+I = (b x h^3) / 12
+I = ______ m^4
+
+8. Material Properties
+Material: ______
+Young's Modulus E = ______ Pa
+
+9. Results Summary
+Beam length = {{ beam.length }} m
+Reaction at A = {{ supports_by_name.A.reactions.Ry }} N
+Reaction at B = {{ supports_by_name.B.reactions.Ry }} N
+Maximum bending moment = {{ extrema.bending_moment.max }} Nm
+Midspan deflection = {{ displacements.midspan.uy }} m
+
+10. Conclusion
+The beam behavior is acceptable / not acceptable.

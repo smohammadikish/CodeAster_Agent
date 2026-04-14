@@ -12,12 +12,9 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-from dotenv import load_dotenv
-
 # ----------------------------
 # Load environment
 # ----------------------------
-load_dotenv()
 from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -31,8 +28,9 @@ from input_parser import (ParameterSheet, build_state_aware_input,
 from library import (list_materials, list_sections, resolve_material_family_name,
                      resolve_section_family_name)
 from storage import (create_run_id, ensure_base_dirs, ensure_run_dirs,
-                     finalize_run, record_artifact, record_tool_event,
-                     register_run, resolve_workspace_file, utc_now_iso)
+                     finalize_run, get_registered_run_paths, record_artifact,
+                     record_tool_event, register_run, resolve_workspace_file,
+                     utc_now_iso)
 from tools.catalog_tools import (build_parametric_section_catalog_tool,
                                  get_material_catalog_tool,
                                  get_section_catalog_tool,
@@ -48,6 +46,12 @@ from tools.visualize_tool import (visualize_freebody_tool,
                                   visualize_mfz_contour_tool,
                                   visualize_resu_tool, visualize_stress_tool)
 from units import DEFAULT_UNIT_POLICY, normalize_user_params_mixed_units
+
+VERIFICATION_ROOT = Path(__file__).resolve().parent / "verification"
+if str(VERIFICATION_ROOT) not in sys.path:
+    sys.path.insert(0, str(VERIFICATION_ROOT))
+
+from orchestrator import run_both_solvers
 
 # ============================================================
 #  Setup
@@ -943,12 +947,78 @@ def build_post_success_message(run_output: str) -> str:
         kept.append(line)
     if not kept:
         kept = ["Simulation finished successfully."]
-    kept.append("You can change parameters for another run, or finish the process.")
+    kept.append("Do you want me to run verification for this run as well?")
     return "\n".join(kept)
 
 
 def build_post_run_idle_message() -> str:
     return "You can change parameters for another run, or finish the process."
+
+
+def is_negative_response(user_input: str) -> bool:
+    text = user_input.strip().lower()
+    return bool(re.search(r"\b(no|not now|no thanks|skip|later)\b", text))
+
+
+def is_verification_input(user_input: str) -> bool:
+    text = user_input.strip().lower()
+    return bool(re.search(r"\b(verify|verification|verif|validate|check results)\b", text))
+
+
+def extract_run_id_and_folder(run_output: str) -> tuple[str | None, Path | None]:
+    run_id_match = re.search(r"Run ID:\s*(\S+)", run_output)
+    run_folder_match = re.search(r"Run folder:\s*(.+)", run_output)
+    run_id = run_id_match.group(1).strip() if run_id_match else None
+    run_folder = Path(run_folder_match.group(1).strip()) if run_folder_match else None
+    return run_id, run_folder
+
+
+def run_verification_for_run(run_id: str) -> str:
+    run_paths = get_registered_run_paths(run_id)
+    if run_paths is None or not run_paths.root.exists():
+        return f"Verification could not start because run '{run_id}' was not found."
+
+    input_dir = run_paths.inputs
+    verification_dir = run_paths.root / "verification"
+
+    if not input_dir.exists():
+        return (
+            "Verification could not start because the run inputs folder is missing.\n"
+            f"Expected folder: {input_dir}"
+        )
+
+    required_files = ["model.comm", "model.export", "model.geo"]
+    missing_files = [name for name in required_files if not (input_dir / name).exists()]
+    if missing_files:
+        return (
+            "Verification could not start because the run inputs are incomplete.\n"
+            f"Missing files in {input_dir}: {', '.join(missing_files)}"
+        )
+
+    try:
+        _, manual_result, opensees_result, comparison = run_both_solvers(
+            input_dir,
+            verification_root=verification_dir,
+        )
+    except Exception as exc:
+        logging.exception("Verification failed for run_id=%s", run_id)
+        return f"Verification failed for run {run_id}: {exc}"
+
+    if manual_result and opensees_result:
+        status_line = "Verification finished successfully."
+    elif manual_result or opensees_result:
+        status_line = "Verification finished with partial results."
+    else:
+        status_line = "Verification failed."
+
+    return (
+        f"{status_line}\n"
+        f"Run ID: {run_id}\n"
+        f"Verification folder: {verification_dir.resolve()}\n"
+        f"Manual: {(verification_dir / 'manual' / 'result.json').resolve()}\n"
+        f"OpenSees: {(verification_dir / 'opensees' / 'results.json').resolve()}\n"
+        f"Comparison: {(verification_dir / 'comparison' / 'comparison_report.txt').resolve()}"
+    )
 
 
 def get_sheet_signature(sheet: ParameterSheet) -> str:
@@ -1194,6 +1264,8 @@ def run_agent_chat(agent_executor: AgentExecutor, extractor_llm: Any | None = No
     parameter_sheet = ParameterSheet()
     simulation_executed = False
     last_executed_signature: str | None = None
+    last_run_id: str | None = None
+    verification_prompt_pending = False
 
     from langchain_core.messages import AIMessage, HumanMessage
 
@@ -1222,6 +1294,42 @@ def run_agent_chat(agent_executor: AgentExecutor, extractor_llm: Any | None = No
             current_signature = get_sheet_signature(parameter_sheet)
             if last_executed_signature is not None and current_signature != last_executed_signature:
                 simulation_executed = False
+                verification_prompt_pending = False
+
+            if simulation_executed and verification_prompt_pending and is_confirmation_input(user_input):
+                if not last_run_id:
+                    output_str = "I could not find a completed run to verify yet."
+                else:
+                    output_str = (
+                        run_verification_for_run(last_run_id)
+                        + "\nYou can change parameters for another run, request verification again, or finish the process."
+                    )
+                verification_prompt_pending = False
+                console_print("\nAgent:\n" + output_str + "\n")
+                chat_history.append(HumanMessage(content=user_input))
+                chat_history.append(AIMessage(content=output_str))
+                continue
+
+            if simulation_executed and verification_prompt_pending and is_negative_response(user_input):
+                output_str = "Okay. You can change parameters for another run, request verification later, or finish the process."
+                verification_prompt_pending = False
+                console_print("\nAgent:\n" + output_str + "\n")
+                chat_history.append(HumanMessage(content=user_input))
+                chat_history.append(AIMessage(content=output_str))
+                continue
+
+            if simulation_executed and is_verification_input(user_input):
+                if not last_run_id:
+                    output_str = "I could not find a completed run to verify yet."
+                else:
+                    output_str = (
+                        run_verification_for_run(last_run_id)
+                        + "\nYou can change parameters for another run, request verification again, or finish the process."
+                    )
+                console_print("\nAgent:\n" + output_str + "\n")
+                chat_history.append(HumanMessage(content=user_input))
+                chat_history.append(AIMessage(content=output_str))
+                continue
 
             if simulation_executed and not parsed_update:
                 output_str = build_post_run_idle_message()
@@ -1244,9 +1352,11 @@ def run_agent_chat(agent_executor: AgentExecutor, extractor_llm: Any | None = No
                             build_pipeline_kwargs_from_sheet(parameter_sheet)
                         )
                     ).strip()
+                    last_run_id, _ = extract_run_id_and_folder(run_output)
                     output_str = build_post_success_message(run_output)
                     simulation_executed = True
                     last_executed_signature = get_sheet_signature(parameter_sheet)
+                    verification_prompt_pending = True
                     console_print("\nAgent:\n" + output_str + "\n")
                     chat_history.append(HumanMessage(content=user_input))
                     chat_history.append(AIMessage(content=output_str))

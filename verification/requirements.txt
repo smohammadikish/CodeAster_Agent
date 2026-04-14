@@ -1,0 +1,12 @@
+# This project currently has no third-party Python package dependencies.
+# It runs on the Python standard library only.
+#
+# Runtime prerequisites:
+# - Python 3.12+
+# - OpenSees executable available in PATH, or configured via
+#   OPENSEES_EXECUTABLE in the repository-root .env file
+#
+# Example setup:
+#   python -m venv .venv
+#   .venv\Scripts\activate
+#   pip install -r requirements.txt

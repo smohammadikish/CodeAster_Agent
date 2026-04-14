@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "application_input.schema.json",
+  "title": "ver-opensees Application Input",
+  "description": "Application input schema aligned to the canonical beam-analysis input contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_type",
+    "beam",
+    "material",
+    "section",
+    "load"
+  ],
+  "properties": {
+    "model_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "case_type": {
+      "type": "string",
+      "enum": [
+        "cantilever_tip_load",
+        "simply_supported_midspan_point_load"
+      ]
+    },
+    "units": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "length": {
+          "type": "string"
+        },
+        "force": {
+          "type": "string"
+        },
+        "moment": {
+          "type": "string"
+        }
+      }
+    },
+    "beam": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "length"
+      ],
+      "properties": {
+        "length": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "num_elements": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 20
+        }
+      }
+    },
+    "material": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "E"
+      ],
+      "properties": {
+        "E": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "nu": {
+          "type": "number"
+        },
+        "rho": {
+          "type": "number"
+        }
+      }
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "A",
+        "Iz"
+      ],
+      "properties": {
+        "A": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "Iy": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "Iz": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "load": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "magnitude",
+        "direction"
+      ],
+      "properties": {
+        "type": {
+          "const": "point_force"
+        },
+        "magnitude": {
+          "type": "number"
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "x_positive",
+            "x_negative",
+            "y_positive",
+            "y_negative"
+          ]
+        }
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stations": {
+          "type": "integer",
+          "minimum": 2,
+          "default": 201
+        },
+        "response_positions": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

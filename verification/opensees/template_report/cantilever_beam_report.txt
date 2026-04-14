@@ -1,0 +1,41 @@
+Structural Analysis Report - Cantilever Beam
+
+1. Analysis Overview
+Model id: {{ model_id }}
+Case type: {{ case_type }}
+Analysis type: 2D elastic beam analysis in OpenSees
+Backend: {{ backend.name }}
+
+2. Model Definition
+Beam length: {{ beam.length }} m
+Number of elements: {{ beam.num_elements }}
+Cross-sectional area: {{ section.A }} m^2
+Elastic modulus: {{ material.E }} Pa
+Second moment of area Iz: {{ section.Iz }} m^4
+
+3. Boundary Conditions and Loading
+Fixed support location: x = {{ support_A.x }} m
+Applied load location: x = {{ load.x }} m
+Applied load type: {{ load.type }}
+Applied load direction: {{ load.direction }}
+Applied load magnitude: {{ load.magnitude }} N
+Primary response point: {{ primary_response_point.label }} at x = {{ primary_response_point.x }} m
+
+4. Support Reactions from OpenSees
+Horizontal reaction at A: {{ support_A.reactions.Rx }} N
+Vertical reaction at A: {{ support_A.reactions.Ry }} N
+Moment reaction at A: {{ support_A.reactions.Mz }} Nm
+
+5. Internal Force Results
+Controlling bending moment: {{ extrema.bending_moment.value }} Nm at x = {{ extrema.bending_moment.x }} m
+Controlling shear force: {{ extrema.shear_force.value }} N at x = {{ extrema.shear_force.x }} m
+Controlling axial force: {{ extrema.axial_force.value }} N at x = {{ extrema.axial_force.x }} m
+
+6. Displacement and Rotation Results
+Vertical displacement at primary response point: {{ primary_response_point.uy }} m
+Rotation at primary response point: {{ primary_response_point.rz }} rad
+Controlling vertical displacement: {{ extrema.displacement_y.value }} m at x = {{ extrema.displacement_y.x }} m
+Controlling rotation: {{ extrema.rotation_z.value }} rad at x = {{ extrema.rotation_z.x }} m
+
+7. Interpretation Note
+This report summarizes the canonical output built from OpenSees recorder files. Response-point and station displacements are interpolated from nodal results, and section forces are reconstructed from element end forces.

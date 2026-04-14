@@ -1,0 +1,790 @@
+{
+  "summary": {
+    "support_type": "cantilever",
+    "load_node": 13,
+    "response_node": 13,
+    "response_disp_x": 0,
+    "response_disp_y": -48.842444881611485,
+    "response_rot_z": -11.951658617033807
+  },
+  "node_displacements": [
+    [
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      -0.494643,
+      -1.90895
+    ],
+    [
+      0.0,
+      -1.92204,
+      -3.6519
+    ],
+    [
+      0.0,
+      -4.1974,
+      -5.22885
+    ],
+    [
+      0.0,
+      -7.23592,
+      -6.63981
+    ],
+    [
+      0.0,
+      -10.9528,
+      -7.88477
+    ],
+    [
+      0.0,
+      -15.2633,
+      -8.96374
+    ],
+    [
+      0.0,
+      -20.0825,
+      -9.87672
+    ],
+    [
+      0.0,
+      -25.3257,
+      -10.6237
+    ],
+    [
+      0.0,
+      -30.9081,
+      -11.2047
+    ],
+    [
+      0.0,
+      -36.7449,
+      -11.6197
+    ],
+    [
+      0.0,
+      -42.7513,
+      -11.8687
+    ],
+    [
+      0.0,
+      -48.8424,
+      -11.9517
+    ]
+  ],
+  "node_displacements_description": {
+    "format": "one item per node: [ux, uy, rz]",
+    "columns": [
+      "ux",
+      "uy",
+      "rz"
+    ],
+    "node_order": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13
+    ]
+  },
+  "node_displacements_by_node": [
+    {
+      "node": 1,
+      "x": 0.0,
+      "ux": 0.0,
+      "uy": 0.0,
+      "rz": 0.0
+    },
+    {
+      "node": 2,
+      "x": 0.5108333333333334,
+      "ux": 0.0,
+      "uy": -0.494643,
+      "rz": -1.90895
+    },
+    {
+      "node": 3,
+      "x": 1.0216666666666667,
+      "ux": 0.0,
+      "uy": -1.92204,
+      "rz": -3.6519
+    },
+    {
+      "node": 4,
+      "x": 1.5325000000000002,
+      "ux": 0.0,
+      "uy": -4.1974,
+      "rz": -5.22885
+    },
+    {
+      "node": 5,
+      "x": 2.0433333333333334,
+      "ux": 0.0,
+      "uy": -7.23592,
+      "rz": -6.63981
+    },
+    {
+      "node": 6,
+      "x": 2.5541666666666667,
+      "ux": 0.0,
+      "uy": -10.9528,
+      "rz": -7.88477
+    },
+    {
+      "node": 7,
+      "x": 3.0650000000000004,
+      "ux": 0.0,
+      "uy": -15.2633,
+      "rz": -8.96374
+    },
+    {
+      "node": 8,
+      "x": 3.5758333333333336,
+      "ux": 0.0,
+      "uy": -20.0825,
+      "rz": -9.87672
+    },
+    {
+      "node": 9,
+      "x": 4.086666666666667,
+      "ux": 0.0,
+      "uy": -25.3257,
+      "rz": -10.6237
+    },
+    {
+      "node": 10,
+      "x": 4.5975,
+      "ux": 0.0,
+      "uy": -30.9081,
+      "rz": -11.2047
+    },
+    {
+      "node": 11,
+      "x": 5.108333333333333,
+      "ux": 0.0,
+      "uy": -36.7449,
+      "rz": -11.6197
+    },
+    {
+      "node": 12,
+      "x": 5.619166666666667,
+      "ux": 0.0,
+      "uy": -42.7513,
+      "rz": -11.8687
+    },
+    {
+      "node": 13,
+      "x": 6.130000000000001,
+      "ux": 0.0,
+      "uy": -48.8424,
+      "rz": -11.9517
+    }
+  ],
+  "element_forces": [
+    [
+      0.0,
+      1350.0,
+      8275.5,
+      0.0,
+      -1350.0,
+      -7585.88
+    ],
+    [
+      0.0,
+      1350.0,
+      7585.88,
+      0.0,
+      -1350.0,
+      -6896.25
+    ],
+    [
+      0.0,
+      1350.0,
+      6896.25,
+      0.0,
+      -1350.0,
+      -6206.63
+    ],
+    [
+      0.0,
+      1350.0,
+      6206.63,
+      0.0,
+      -1350.0,
+      -5517.0
+    ],
+    [
+      0.0,
+      1350.0,
+      5517.0,
+      0.0,
+      -1350.0,
+      -4827.37
+    ],
+    [
+      0.0,
+      1350.0,
+      4827.37,
+      0.0,
+      -1350.0,
+      -4137.75
+    ],
+    [
+      0.0,
+      1350.0,
+      4137.75,
+      0.0,
+      -1350.0,
+      -3448.13
+    ],
+    [
+      0.0,
+      1350.0,
+      3448.13,
+      0.0,
+      -1350.0,
+      -2758.5
+    ],
+    [
+      0.0,
+      1350.0,
+      2758.5,
+      0.0,
+      -1350.0,
+      -2068.88
+    ],
+    [
+      0.0,
+      1350.0,
+      2068.87,
+      0.0,
+      -1350.0,
+      -1379.25
+    ],
+    [
+      0.0,
+      1350.0,
+      1379.25,
+      0.0,
+      -1350.0,
+      -689.625
+    ],
+    [
+      0.0,
+      1350.0,
+      689.625,
+      0.0,
+      -1350.0,
+      1.18064e-10
+    ]
+  ],
+  "element_forces_description": {
+    "format": "one item per element: [axial_i, shear_i, moment_i, axial_j, shear_j, moment_j]",
+    "columns": [
+      "axial_i",
+      "shear_i",
+      "moment_i",
+      "axial_j",
+      "shear_j",
+      "moment_j"
+    ],
+    "element_order": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ]
+  },
+  "element_forces_by_element": [
+    {
+      "element": 1,
+      "end": "i",
+      "x": 0.0,
+      "axial_force": 0.0,
+      "shear_force": 1350.0,
+      "bending_moment": 8275.5
+    },
+    {
+      "element": 1,
+      "end": "j",
+      "x": 0.5108333333333334,
+      "axial_force": 0.0,
+      "shear_force": -1350.0,
+      "bending_moment": -7585.88
+    },
+    {
+      "element": 2,
+      "end": "i",
+      "x": 0.5108333333333334,
+      "axial_force": 0.0,
+      "shear_force": 1350.0,
+      "bending_moment": 7585.88
+    },
+    {
+      "element": 2,
+      "end": "j",
+      "x": 1.0216666666666667,
+      "axial_force": 0.0,
+      "shear_force": -1350.0,
+      "bending_moment": -6896.25
+    },
+    {
+      "element": 3,
+      "end": "i",
+      "x": 1.0216666666666667,
+      "axial_force": 0.0,
+      "shear_force": 1350.0,
+      "bending_moment": 6896.25
+    },
+    {
+      "element": 3,
+      "end": "j",
+      "x": 1.5325000000000002,
+      "axial_force": 0.0,
+      "shear_force": -1350.0,
+      "bending_moment": -6206.63
+    },
+    {
+      "element": 4,
+      "end": "i",
+      "x": 1.5325000000000002,
+      "axial_force": 0.0,
+      "shear_force": 1350.0,
+      "bending_moment": 6206.63
+    },
+    {
+      "element": 4,
+      "end": "j",
+      "x": 2.0433333333333334,
+      "axial_force": 0.0,
+      "shear_force": -1350.0,
+      "bending_moment": -5517.0
+    },
+    {
+      "element": 5,
+      "end": "i",
+      "x": 2.0433333333333334,
+      "axial_force": 0.0,
+      "shear_force": 1350.0,
+      "bending_moment": 5517.0
+    },
+    {
+      "element": 5,
+      "end": "j",
+      "x": 2.5541666666666667,
+      "axial_force": 0.0,
+      "shear_force": -1350.0,
+      "bending_moment": -4827.37
+    },
+    {
+      "element": 6,
+      "end": "i",
+      "x": 2.5541666666666667,
+      "axial_force": 0.0,
+      "shear_force": 1350.0,
+      "bending_moment": 4827.37
+    },
+    {
+      "element": 6,
+      "end": "j",
+      "x": 3.0650000000000004,
+      "axial_force": 0.0,
+      "shear_force": -1350.0,
+      "bending_moment": -4137.75
+    },
+    {
+      "element": 7,
+      "end": "i",
+      "x": 3.0650000000000004,
+      "axial_force": 0.0,
+      "shear_force": 1350.0,
+      "bending_moment": 4137.75
+    },
+    {
+      "element": 7,
+      "end": "j",
+      "x": 3.5758333333333336,
+      "axial_force": 0.0,
+      "shear_force": -1350.0,
+      "bending_moment": -3448.13
+    },
+    {
+      "element": 8,
+      "end": "i",
+      "x": 3.5758333333333336,
+      "axial_force": 0.0,
+      "shear_force": 1350.0,
+      "bending_moment": 3448.13
+    },
+    {
+      "element": 8,
+      "end": "j",
+      "x": 4.086666666666667,
+      "axial_force": 0.0,
+      "shear_force": -1350.0,
+      "bending_moment": -2758.5
+    },
+    {
+      "element": 9,
+      "end": "i",
+      "x": 4.086666666666667,
+      "axial_force": 0.0,
+      "shear_force": 1350.0,
+      "bending_moment": 2758.5
+    },
+    {
+      "element": 9,
+      "end": "j",
+      "x": 4.5975,
+      "axial_force": 0.0,
+      "shear_force": -1350.0,
+      "bending_moment": -2068.88
+    },
+    {
+      "element": 10,
+      "end": "i",
+      "x": 4.5975,
+      "axial_force": 0.0,
+      "shear_force": 1350.0,
+      "bending_moment": 2068.87
+    },
+    {
+      "element": 10,
+      "end": "j",
+      "x": 5.108333333333333,
+      "axial_force": 0.0,
+      "shear_force": -1350.0,
+      "bending_moment": -1379.25
+    },
+    {
+      "element": 11,
+      "end": "i",
+      "x": 5.108333333333333,
+      "axial_force": 0.0,
+      "shear_force": 1350.0,
+      "bending_moment": 1379.25
+    },
+    {
+      "element": 11,
+      "end": "j",
+      "x": 5.619166666666667,
+      "axial_force": 0.0,
+      "shear_force": -1350.0,
+      "bending_moment": -689.625
+    },
+    {
+      "element": 12,
+      "end": "i",
+      "x": 5.619166666666667,
+      "axial_force": 0.0,
+      "shear_force": 1350.0,
+      "bending_moment": 689.625
+    },
+    {
+      "element": 12,
+      "end": "j",
+      "x": 6.130000000000001,
+      "axial_force": 0.0,
+      "shear_force": -1350.0,
+      "bending_moment": 1.18064e-10
+    }
+  ],
+  "support_reactions": [
+    [
+      1.0,
+      0.0,
+      1349.9999999999995,
+      8275.5
+    ]
+  ],
+  "support_reactions_description": {
+    "format": "one item per support node: [node, Rx, Ry, Mz]",
+    "columns": [
+      "node",
+      "Rx",
+      "Ry",
+      "Mz"
+    ]
+  },
+  "derived_summary": {
+    "generated_at": "2026-04-11T18:02:22",
+    "analysis_name": "beam_job",
+    "support_type": "cantilever",
+    "beam": {
+      "length": 6.13,
+      "num_elements": 12,
+      "num_nodes": 13,
+      "element_length": 0.5108333333333334
+    },
+    "section": {
+      "area": 0.000764,
+      "elastic_modulus": 25000000000.0,
+      "inertia": 8.489e-08
+    },
+    "load": {
+      "node": 13,
+      "x": 6.130000000000001,
+      "fx": 0.0,
+      "fy": -1350.0,
+      "mz": 0.0
+    },
+    "response_node": {
+      "node": 13,
+      "x": 6.130000000000001,
+      "ux": 0.0,
+      "uy": -48.8424,
+      "rz": -11.9517
+    },
+    "load_node_response": {
+      "node": 13,
+      "x": 6.130000000000001,
+      "ux": 0.0,
+      "uy": -48.8424,
+      "rz": -11.9517
+    },
+    "supports": [
+      {
+        "name": "A",
+        "role": "fixed",
+        "node": 1,
+        "x": 0.0,
+        "reactions": {
+          "Rx": 0.0,
+          "Ry": 1349.9999999999995,
+          "Mz": 8275.5
+        }
+      }
+    ],
+    "supports_by_name": {
+      "A": {
+        "name": "A",
+        "role": "fixed",
+        "node": 1,
+        "x": 0.0,
+        "reactions": {
+          "Rx": 0.0,
+          "Ry": 1349.9999999999995,
+          "Mz": 8275.5
+        }
+      }
+    },
+    "extrema": {
+      "axial_force": {
+        "max": {
+          "value": 0.0,
+          "absolute_value": 0.0,
+          "x": 0.0,
+          "element": 1,
+          "end": "i"
+        },
+        "min": {
+          "value": 0.0,
+          "absolute_value": 0.0,
+          "x": 0.0,
+          "element": 1,
+          "end": "i"
+        },
+        "max_abs": {
+          "value": 0.0,
+          "absolute_value": 0.0,
+          "x": 0.0,
+          "element": 1,
+          "end": "i"
+        }
+      },
+      "shear_force": {
+        "max": {
+          "value": 1350.0,
+          "absolute_value": 1350.0,
+          "x": 0.0,
+          "element": 1,
+          "end": "i"
+        },
+        "min": {
+          "value": -1350.0,
+          "absolute_value": 1350.0,
+          "x": 0.5108333333333334,
+          "element": 1,
+          "end": "j"
+        },
+        "max_abs": {
+          "value": 1350.0,
+          "absolute_value": 1350.0,
+          "x": 0.0,
+          "element": 1,
+          "end": "i"
+        }
+      },
+      "bending_moment": {
+        "max": {
+          "value": 8275.5,
+          "absolute_value": 8275.5,
+          "x": 0.0,
+          "element": 1,
+          "end": "i"
+        },
+        "min": {
+          "value": -7585.88,
+          "absolute_value": 7585.88,
+          "x": 0.5108333333333334,
+          "element": 1,
+          "end": "j"
+        },
+        "max_abs": {
+          "value": 8275.5,
+          "absolute_value": 8275.5,
+          "x": 0.0,
+          "element": 1,
+          "end": "i"
+        }
+      },
+      "displacement_x": {
+        "max": {
+          "value": 0.0,
+          "absolute_value": 0.0,
+          "x": 0.0,
+          "node": 1
+        },
+        "min": {
+          "value": 0.0,
+          "absolute_value": 0.0,
+          "x": 0.0,
+          "node": 1
+        },
+        "max_abs": {
+          "value": 0.0,
+          "absolute_value": 0.0,
+          "x": 0.0,
+          "node": 1
+        }
+      },
+      "displacement_y": {
+        "max": {
+          "value": 0.0,
+          "absolute_value": 0.0,
+          "x": 0.0,
+          "node": 1
+        },
+        "min": {
+          "value": -48.8424,
+          "absolute_value": 48.8424,
+          "x": 6.130000000000001,
+          "node": 13
+        },
+        "max_abs": {
+          "value": -48.8424,
+          "absolute_value": 48.8424,
+          "x": 6.130000000000001,
+          "node": 13
+        }
+      },
+      "rotation_z": {
+        "max": {
+          "value": 0.0,
+          "absolute_value": 0.0,
+          "x": 0.0,
+          "node": 1
+        },
+        "min": {
+          "value": -11.9517,
+          "absolute_value": 11.9517,
+          "x": 6.130000000000001,
+          "node": 13
+        },
+        "max_abs": {
+          "value": -11.9517,
+          "absolute_value": 11.9517,
+          "x": 6.130000000000001,
+          "node": 13
+        }
+      },
+      "reaction_x": {
+        "max": {
+          "value": 0.0,
+          "absolute_value": 0.0,
+          "x": 0.0,
+          "node": 1,
+          "name": "A"
+        },
+        "min": {
+          "value": 0.0,
+          "absolute_value": 0.0,
+          "x": 0.0,
+          "node": 1,
+          "name": "A"
+        },
+        "max_abs": {
+          "value": 0.0,
+          "absolute_value": 0.0,
+          "x": 0.0,
+          "node": 1,
+          "name": "A"
+        }
+      },
+      "reaction_y": {
+        "max": {
+          "value": 1349.9999999999995,
+          "absolute_value": 1349.9999999999995,
+          "x": 0.0,
+          "node": 1,
+          "name": "A"
+        },
+        "min": {
+          "value": 1349.9999999999995,
+          "absolute_value": 1349.9999999999995,
+          "x": 0.0,
+          "node": 1,
+          "name": "A"
+        },
+        "max_abs": {
+          "value": 1349.9999999999995,
+          "absolute_value": 1349.9999999999995,
+          "x": 0.0,
+          "node": 1,
+          "name": "A"
+        }
+      },
+      "reaction_mz": {
+        "max": {
+          "value": 8275.5,
+          "absolute_value": 8275.5,
+          "x": 0.0,
+          "node": 1,
+          "name": "A"
+        },
+        "min": {
+          "value": 8275.5,
+          "absolute_value": 8275.5,
+          "x": 0.0,
+          "node": 1,
+          "name": "A"
+        },
+        "max_abs": {
+          "value": 8275.5,
+          "absolute_value": 8275.5,
+          "x": 0.0,
+          "node": 1,
+          "name": "A"
+        }
+      }
+    }
+  }
+}

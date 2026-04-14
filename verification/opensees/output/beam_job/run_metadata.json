@@ -1,0 +1,46 @@
+{
+  "analysis_name": "beam_job",
+  "case_type": "cantilever_tip_load",
+  "opensees_executable": "C:\\OpenSees3.8.0-x64.exe\\OpenSees3.8.0\\bin\\OpenSees.exe",
+  "output_root": "output",
+  "model_id": "beam_job",
+  "units": {},
+  "length": 6.13,
+  "num_elements": 12,
+  "material": {
+    "elastic_modulus": 25000000000.0,
+    "poisson_ratio": null,
+    "density": null
+  },
+  "section": {
+    "area": 0.000764,
+    "inertia_z": 8.489e-08,
+    "inertia_y": null
+  },
+  "load": {
+    "load_type": "point_force",
+    "direction": "y_negative",
+    "magnitude": 1350.0,
+    "x": 6.130000000000001,
+    "node": 13
+  },
+  "stations": 201,
+  "response_positions": [
+    6.130000000000001
+  ],
+  "meta": {},
+  "run_directory": "output\\beam_job",
+  "inputs_directory": "output\\beam_job\\inputs",
+  "results_directory": "output\\beam_job\\results",
+  "resolved_opensees_executable": "C:\\OpenSees3.8.0-x64.exe\\OpenSees3.8.0\\bin\\OpenSees.exe",
+  "input_source": {
+    "source_type": "code_aster",
+    "root_path": "C:\\Users\\Michele\\ver_opensees\\input",
+    "snapshot_files": [
+      "C:\\Users\\Michele\\ver_opensees\\input\\model.comm",
+      "C:\\Users\\Michele\\ver_opensees\\input\\model.geo",
+      "C:\\Users\\Michele\\ver_opensees\\input\\model.export",
+      "C:\\Users\\Michele\\ver_opensees\\input\\model.med"
+    ]
+  }
+}

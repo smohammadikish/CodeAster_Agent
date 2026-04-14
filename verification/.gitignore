@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.uv-cache/
+.env
+workspace/
+Automated_manual_calculations/workspace/
+opensees/workspace/

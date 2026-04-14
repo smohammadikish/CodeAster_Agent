@@ -1,0 +1,41 @@
+Structural Analysis Report - Cantilever Beam
+
+1. Analysis Overview
+Model id: beam_job
+Case type: cantilever_tip_load
+Analysis type: 2D elastic beam analysis in OpenSees
+Backend: OpenSees
+
+2. Model Definition
+Beam length: 6.13 m
+Number of elements: 12
+Cross-sectional area: 0.000764 m^2
+Elastic modulus: 2.5e+10 Pa
+Second moment of area Iz: 8.489e-08 m^4
+
+3. Boundary Conditions and Loading
+Fixed support location: x = 0 m
+Applied load location: x = 6.13 m
+Applied load type: point_force
+Applied load direction: y_negative
+Applied load magnitude: 1350 N
+Primary response point: load_point at x = 6.13 m
+
+4. Support Reactions from OpenSees
+Horizontal reaction at A: 0 N
+Vertical reaction at A: 1350 N
+Moment reaction at A: 8275.5 Nm
+
+5. Internal Force Results
+Controlling bending moment: 8275.5 Nm at x = 0 m
+Controlling shear force: 1350 N at x = 0 m
+Controlling axial force: 0 N at x = 0 m
+
+6. Displacement and Rotation Results
+Vertical displacement at primary response point: -48.8424 m
+Rotation at primary response point: -11.9517 rad
+Controlling vertical displacement: -48.8424 m at x = 6.13 m
+Controlling rotation: -11.9517 rad at x = 6.13 m
+
+7. Interpretation Note
+This report summarizes the canonical output built from OpenSees recorder files. Response-point and station displacements are interpolated from nodal results, and section forces are reconstructed from element end forces.

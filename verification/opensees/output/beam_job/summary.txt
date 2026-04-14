@@ -1,0 +1,6 @@
+support_type cantilever
+load_node 13
+response_node 13
+response_disp_x              0.00000000000000000000
+response_disp_y            -48.84244488161148467498
+response_rot_z            -11.95165861703380727477

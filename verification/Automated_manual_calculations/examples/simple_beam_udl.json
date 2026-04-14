@@ -1,0 +1,40 @@
+{
+  "beam": {
+    "length": 8.0,
+    "section": {
+      "A": 0.03,
+      "Ix": 1.8e-5,
+      "Iy": 9.0e-6,
+      "T": 0.012
+    },
+    "material": {
+      "rho": 7850,
+      "E": 210000000000.0,
+      "fy": 355000000.0
+    }
+  },
+  "supports": [
+    {
+      "name": "A",
+      "type": "pin",
+      "x": 0.0
+    },
+    {
+      "name": "B",
+      "type": "roller_y",
+      "x": 8.0
+    }
+  ],
+  "loads": [
+    {
+      "type": "distributed_force",
+      "label": "Uniform distributed load",
+      "x_start": 0.0,
+      "x_end": 8.0,
+      "qy": -4.0
+    }
+  ],
+  "analysis": {
+    "stations": 41
+  }
+}

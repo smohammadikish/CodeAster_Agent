@@ -1,0 +1,318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schema/application_output.schema.json",
+  "title": "Application Output",
+  "description": "Canonical JSON output schema emitted by the application.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_type",
+    "backend",
+    "beam",
+    "section",
+    "material",
+    "load",
+    "supports",
+    "extrema",
+    "response_points"
+  ],
+  "properties": {
+    "model_id": {
+      "type": "string"
+    },
+    "case_type": {
+      "type": "string",
+      "enum": [
+        "cantilever_tip_load",
+        "simply_supported_midspan_point_load"
+      ]
+    },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "beam": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "length"
+      ],
+      "properties": {
+        "length": {
+          "type": "number"
+        },
+        "num_elements": {
+          "type": "integer"
+        }
+      }
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "A",
+        "Iz"
+      ],
+      "properties": {
+        "A": {
+          "type": "number"
+        },
+        "Iy": {
+          "type": "number"
+        },
+        "Iz": {
+          "type": "number"
+        }
+      }
+    },
+    "material": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "E"
+      ],
+      "properties": {
+        "E": {
+          "type": "number"
+        },
+        "nu": {
+          "type": "number"
+        },
+        "rho": {
+          "type": "number"
+        }
+      }
+    },
+    "load": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "magnitude",
+        "direction",
+        "x"
+      ],
+      "properties": {
+        "type": {
+          "const": "point_force"
+        },
+        "magnitude": {
+          "type": "number"
+        },
+        "direction": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        }
+      }
+    },
+    "supports": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/support"
+      }
+    },
+    "extrema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "axial_force",
+        "shear_force",
+        "bending_moment",
+        "displacement_y",
+        "rotation_z"
+      ],
+      "properties": {
+        "axial_force": {
+          "$ref": "#/$defs/extremePoint"
+        },
+        "shear_force": {
+          "$ref": "#/$defs/extremePoint"
+        },
+        "bending_moment": {
+          "$ref": "#/$defs/extremePoint"
+        },
+        "displacement_y": {
+          "$ref": "#/$defs/extremePoint"
+        },
+        "rotation_z": {
+          "$ref": "#/$defs/extremePoint"
+        }
+      }
+    },
+    "response_points": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/responsePoint"
+      }
+    },
+    "stations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/station"
+      }
+    },
+    "summary_text": {
+      "type": "string"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "solver_scope": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "reactions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "Rx",
+        "Ry",
+        "Mz"
+      ],
+      "properties": {
+        "Rx": {
+          "type": "number"
+        },
+        "Ry": {
+          "type": "number"
+        },
+        "Mz": {
+          "type": "number"
+        }
+      }
+    },
+    "support": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "type",
+        "x",
+        "reactions"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "fixed",
+            "pin",
+            "roller_y"
+          ]
+        },
+        "x": {
+          "type": "number"
+        },
+        "reactions": {
+          "$ref": "#/$defs/reactions"
+        }
+      }
+    },
+    "extremePoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "x"
+      ],
+      "properties": {
+        "value": {
+          "type": "number"
+        },
+        "x": {
+          "type": "number"
+        }
+      }
+    },
+    "responsePoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "x",
+        "N",
+        "V",
+        "M",
+        "uy",
+        "rz"
+      ],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        },
+        "N": {
+          "type": "number"
+        },
+        "V": {
+          "type": "number"
+        },
+        "M": {
+          "type": "number"
+        },
+        "uy": {
+          "type": "number"
+        },
+        "rz": {
+          "type": "number"
+        }
+      }
+    },
+    "station": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "N",
+        "V",
+        "M",
+        "uy",
+        "rz"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "N": {
+          "type": "number"
+        },
+        "V": {
+          "type": "number"
+        },
+        "M": {
+          "type": "number"
+        },
+        "uy": {
+          "type": "number"
+        },
+        "rz": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

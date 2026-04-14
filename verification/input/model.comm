@@ -1,0 +1,151 @@
+# This file is the main Code_Aster command file for the sample beam run.
+# It defines the model, loads, supports, and requested output tables.
+
+# __________________________ Start __________________________
+DEBUT(PAR_LOT='NON');
+
+# Read the beam mesh from the MED file.
+mesh = LIRE_MAILLAGE(FORMAT='MED', UNITE=20);
+
+# Create node groups from the physical mesh groups.
+mesh = DEFI_GROUP(
+  reuse=mesh,
+  CREA_GROUP_NO=(
+    _F(GROUP_MA=('BEAM',), CRIT_NOEUD='TOUS'),
+    _F(GROUP_MA=('BASE',), CRIT_NOEUD='TOUS'),
+    _F(GROUP_MA=('TIP',),  CRIT_NOEUD='TOUS'),
+  ),
+  MAILLAGE=mesh
+);
+
+# Define a 3D beam mechanical model.
+model = AFFE_MODELE(
+  MAILLAGE=mesh,
+  AFFE=_F(
+    GROUP_MA=('BEAM',),
+    PHENOMENE='MECANIQUE',
+    MODELISATION='POU_D_T'
+  )
+);
+
+# Define elastic material properties and assign them to the beam.
+mat = DEFI_MATERIAU(ELAS=_F(E=210000000000.0, NU=0.3, RHO=7850.0));
+
+mater = AFFE_MATERIAU(
+  MAILLAGE=mesh,
+  AFFE=_F(GROUP_MA=('BEAM',), MATER=mat)
+);
+
+# Define the beam section.
+# Note: the size values below are written in millimetres in this sample.
+cara = AFFE_CARA_ELEM(
+  MODELE=model,
+  POUTRE=_F(
+    GROUP_MA=('BEAM',),
+    SECTION='RECTANGLE',
+    CARA=('HY','HZ'),
+    VALE=(210.0, 130.0)
+  )
+);
+
+# Fix all beam degrees of freedom at the base.
+constr = AFFE_CHAR_MECA(
+  MODELE=model,
+  DDL_IMPO=_F(
+    GROUP_NO=('BASE',),
+    DX=0.0, DY=0.0, DZ=0.0,
+    DRX=0.0, DRY=0.0, DRZ=0.0
+  )
+);
+
+# Apply one downward nodal force at the tip.
+load = AFFE_CHAR_MECA(
+  MODELE=model,
+  FORCE_NODALE=_F(
+    GROUP_NO=('TIP',),
+    FY=-1500.0
+  )
+);
+
+# Run the static analysis.
+res_stat = MECA_STATIQUE(
+  MODELE=model,
+  CHAM_MATER=mater,
+  CARA_ELEM=cara,
+  EXCIT=(
+    _F(CHARGE=constr),
+    _F(CHARGE=load)
+  ),
+  SOLVEUR=_F(
+    METHODE='MUMPS',
+    STOP_SINGULIER='OUI',
+    RENUM='METIS',
+    NPREC=8,
+    ELIM_LAGR='NON'
+  )
+);
+
+# Ask Code_Aster to compute reactions and internal-force fields.
+res_stat = CALC_CHAMP(
+  reuse=res_stat,
+  RESULTAT=res_stat,
+  FORCE=('REAC_NODA',),
+  CONTRAINTE=('EFGE_ELNO', 'SIEF_ELNO')
+);
+
+# Build output tables for reactions and displacements.
+tab_reac = CREA_TABLE(
+  RESU=_F(
+    GROUP_NO=('BASE',),
+    NOM_CHAM='REAC_NODA',
+    RESULTAT=res_stat,
+    TOUT_CMP='OUI'
+  ),
+  TITRE='Nodal Reactions'
+);
+
+tab_disp = CREA_TABLE(
+  RESU=_F(
+    TOUT='OUI',
+    NOM_CHAM='DEPL',
+    RESULTAT=res_stat,
+    TOUT_CMP='OUI'
+  ),
+  TITRE='Nodal Displacements'
+);
+
+# Export the reaction and displacement tables as text files.
+IMPR_TABLE(TABLE=tab_reac, UNITE=18, SEPARATEUR=' ', FORMAT='TABLEAU', FORMAT_R='E12.5');
+IMPR_TABLE(TABLE=tab_disp, UNITE=19, SEPARATEUR=' ', FORMAT='TABLEAU', FORMAT_R='E12.5');
+
+# Export the displacement result field.
+IMPR_RESU(
+  FORMAT='RESULTAT',
+  UNITE=80,
+  RESU=_F(RESULTAT=res_stat, NOM_CHAM='DEPL')
+);
+
+# Export local beam axes for reference.
+IMPR_CONCEPT(
+  CONCEPT=_F(CARA_ELEM=cara, MODELE=model, REPERE_LOCAL='ELEM'),
+  FORMAT='RESULTAT',
+  UNITE=53
+);
+
+# Extract and export internal beam forces.
+SIEFTAB = POST_RELEVE_T(
+  ACTION=_F(
+    INTITULE='BeamForces',
+    RESULTAT=res_stat,
+    NOM_CHAM='SIEF_ELNO',
+    GROUP_NO=('BEAM',),
+    OPERATION='EXTRACTION',
+    TOUT_ORDRE='OUI',
+    TOUT_CMP='OUI'
+  )
+);
+
+IMPR_TABLE(TABLE=SIEFTAB, UNITE=21, SEPARATEUR=';', FORMAT='TABLEAU', FORMAT_R='E12.5');
+
+# __________________________ End __________________________
+FIN();

@@ -1,0 +1,26 @@
+{
+  "model_id": "simply_supported_beam_case_01",
+  "case_type": "simply_supported_midspan_point_load",
+  "beam": {
+    "length": 6.0,
+    "num_elements": 4
+  },
+  "material": {
+    "E": 200000000000.0
+  },
+  "section": {
+    "A": 0.02,
+    "Iz": 0.000133333333
+  },
+  "load": {
+    "type": "point_force",
+    "magnitude": 10000.0,
+    "direction": "y_negative"
+  },
+  "analysis": {
+    "stations": 201,
+    "response_positions": [
+      3.0
+    ]
+  }
+}

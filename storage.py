@@ -56,6 +56,29 @@ def get_run_paths(run_id: str) -> RunPaths:
     )
 
 
+def get_registered_run_paths(run_id: str) -> RunPaths | None:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT run_dir FROM runs WHERE run_id = ? ORDER BY rowid DESC LIMIT 1",
+            (run_id,),
+        ).fetchone()
+
+    if not row or not row[0]:
+        return None
+
+    root = Path(row[0])
+    return RunPaths(
+        run_id=run_id,
+        root=root,
+        inputs=root / "inputs",
+        outputs=root / "outputs",
+        viz=root / "viz",
+        logs=root / "logs",
+        meta=root / "meta",
+    )
+
+
 def ensure_run_dirs(run_id: str) -> RunPaths:
     paths = get_run_paths(run_id)
     for folder in (

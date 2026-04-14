@@ -1,0 +1,5 @@
+case_type cantilever_tip_load
+load_node 13
+load_disp_x              0.00000000000000000000
+load_disp_y            -48.84244488161148467498
+load_rot_z            -11.95165861703380727477
