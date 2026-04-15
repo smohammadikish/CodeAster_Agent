@@ -52,7 +52,7 @@ Or with plain pip:
 python -m pip install -r requirements.txt
 ```
 
-## Run
+## Run (CLI)
 
 Interactive chat mode:
 
@@ -66,52 +66,24 @@ One-shot mode:
 python main_agent.py --mode agent --input "simulate a 4m beam with 25 elements and 2000 N load"
 ```
 
-## Gradio UI Manual
+## Run Frontend
 
-The Gradio interface is in [`frontend/gui_gradio.py`](/abs/path/c:/Users/Michele/training/frontend/gui_gradio.py:1).
+Frontend entry points:
 
-Install dependencies:
+- `frontend/gui_streamlit.py` (recommended)
+- `frontend/gui_gradio.py`
 
-```powershell
-.\.venv\Scripts\activate
-python -m pip install gradio
-```
-
-Run from the repo root:
+From repo root:
 
 ```powershell
 cd C:\Users\Michele\training
-python frontend\gui_gradio.py
-```
-
-Run from inside the `frontend` folder:
-
-```powershell
-cd C:\Users\Michele\training\frontend
-python gui_gradio.py
-```
-
-Open:
-
-```text
-http://localhost:7860
-```
-
-What it does:
-
-- Reuses the same `main_agent.py` backend agent as the CLI flow.
-- Shows the current workflow phase, parameter sheet, run overview, execution timeline, generated plots, and artifact previews.
-- Browses prior runs from SQLite and the local `workspace/runs/<run_id>` folders.
-- Exposes run-scoped verification and a side-by-side compare area for image artifacts.
-- Accepts stop commands such as `stop`, `cancel`, `exit`, and `done`.
-
-## Streamlit UI (Recommended)
-
-If Gradio layout is not stable in your environment, use the Streamlit frontend:
-
-```powershell
 .\.venv\Scripts\activate
-python -m pip install streamlit
+python -m pip install streamlit gradio
+```
+
+### Streamlit (Recommended)
+
+```powershell
 streamlit run frontend\gui_streamlit.py
 ```
 
@@ -121,7 +93,27 @@ Open:
 http://localhost:8501
 ```
 
-This UI keeps the same backend workflow (stateful chat, run confirmation, deterministic execution, run history, artifacts, verification, and compare view) with a denser desktop layout.
+### Gradio
+
+```powershell
+python frontend\gui_gradio.py
+```
+
+Open:
+
+```text
+http://localhost:7860
+```
+
+Both frontends reuse the same backend agent and pipeline.
+
+What the frontend provides:
+
+- Reuses the same `main_agent.py` backend agent as the CLI flow.
+- Shows the current workflow phase, parameter sheet, run overview, execution timeline, generated plots, and artifact previews.
+- Browses prior runs from SQLite and the local `workspace/runs/<run_id>` folders.
+- Exposes run-scoped verification and a side-by-side compare area for image artifacts.
+- Accepts stop commands such as `stop`, `cancel`, `exit`, and `done`.
 
 ## Recommended Chat Flow
 
@@ -178,7 +170,7 @@ catalog layer.
 
 ## Outputs
 
-Generated files are written to [`workspace/`](c:\Users\EX-GIGI\training\workspace):
+Generated files are written under `workspace/`:
 
 - `model.geo`
 - `model.med`

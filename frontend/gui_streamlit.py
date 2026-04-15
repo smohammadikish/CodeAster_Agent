@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -45,23 +47,37 @@ from main_agent import (
 from storage import DB_PATH, RUNS_ROOT, get_registered_run_paths, init_db
 
 
+def _create_workspace_id() -> str:
+    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    return f"chat_{stamp}_{uuid.uuid4().hex[:6]}"
+
+
+def _default_workspace(counter: int) -> dict[str, Any]:
+    return {
+        "name": f"Chat {counter}",
+        "run_ids": [],
+        "sheet": ParameterSheet(),
+        "chat_messages": [],
+        "lc_history": [],
+        "simulation_executed": False,
+        "last_executed_signature": None,
+        "last_run_id": None,
+        "verification_prompt_pending": False,
+    }
+
+
 def _ensure_state() -> None:
+    if "workspaces" not in st.session_state:
+        ws_id = _create_workspace_id()
+        st.session_state.workspace_counter = 1
+        st.session_state.workspaces = {ws_id: _default_workspace(1)}
+        st.session_state.active_workspace_id = ws_id
+
+    if "run_labels" not in st.session_state:
+        st.session_state.run_labels = {}
+
     if "sheet" not in st.session_state:
-        st.session_state.sheet = ParameterSheet()
-    if "chat_messages" not in st.session_state:
-        st.session_state.chat_messages = []
-    if "lc_history" not in st.session_state:
-        st.session_state.lc_history = []
-    if "simulation_executed" not in st.session_state:
-        st.session_state.simulation_executed = False
-    if "last_executed_signature" not in st.session_state:
-        st.session_state.last_executed_signature = None
-    if "last_run_id" not in st.session_state:
-        st.session_state.last_run_id = None
-    if "verification_prompt_pending" not in st.session_state:
-        st.session_state.verification_prompt_pending = False
-    if "selected_run_id" not in st.session_state:
-        st.session_state.selected_run_id = None
+        _load_workspace_state(st.session_state.active_workspace_id)
 
 
 @st.cache_resource
@@ -100,10 +116,79 @@ def _query_runs() -> list[dict[str, Any]]:
                 "status": row["status"],
                 "scenario": params.get("scenario", ""),
                 "created_at": row["created_at"],
+                "params": params,
                 "verification": "yes" if (run_dir / "verification").exists() else "no",
             }
         )
     return out
+
+
+def _scenario_label(scenario: str) -> str:
+    if scenario == "simply_supported_midpoint_load":
+        return "simple_beam"
+    if scenario == "cantilever_tip_load":
+        return "cantilever"
+    return "beam"
+
+
+def _format_force_label(params: dict[str, Any]) -> str:
+    force = params.get("FY")
+    unit = str(params.get("force_unit") or "N").lower()
+    try:
+        value = abs(float(force))
+    except Exception:
+        return "load"
+    if unit == "kn":
+        return f"{value:g}kN"
+    if unit == "n":
+        return f"{(value / 1000.0):g}kN"
+    return f"{value:g}{unit}"
+
+
+def _run_display_name(run: dict[str, Any]) -> str:
+    run_id = run["run_id"]
+    if run_id in st.session_state.run_labels:
+        return st.session_state.run_labels[run_id]
+
+    params = run.get("params", {})
+    scenario = _scenario_label(str(params.get("scenario") or ""))
+    load = _format_force_label(params)
+    material = str(params.get("material") or params.get("material_hint") or "material")
+    section = str(params.get("section") or params.get("section_hint") or "section")
+    compact = f"{scenario}/{load}/{material}/{section}"
+    suffix = run_id[-6:] if len(run_id) >= 6 else run_id
+    return f"{compact} ({suffix})"
+
+
+def _active_workspace() -> dict[str, Any]:
+    return st.session_state.workspaces[st.session_state.active_workspace_id]
+
+
+def _save_active_workspace_state() -> None:
+    ws = _active_workspace()
+    ws["sheet"] = st.session_state.sheet
+    ws["chat_messages"] = st.session_state.chat_messages
+    ws["lc_history"] = st.session_state.lc_history
+    ws["simulation_executed"] = st.session_state.simulation_executed
+    ws["last_executed_signature"] = st.session_state.last_executed_signature
+    ws["last_run_id"] = st.session_state.last_run_id
+    ws["verification_prompt_pending"] = st.session_state.verification_prompt_pending
+
+
+def _load_workspace_state(workspace_id: str) -> None:
+    ws = st.session_state.workspaces[workspace_id]
+    st.session_state.sheet = ws["sheet"]
+    st.session_state.chat_messages = ws["chat_messages"]
+    st.session_state.lc_history = ws["lc_history"]
+    st.session_state.simulation_executed = ws["simulation_executed"]
+    st.session_state.last_executed_signature = ws["last_executed_signature"]
+    st.session_state.last_run_id = ws["last_run_id"]
+    st.session_state.verification_prompt_pending = ws["verification_prompt_pending"]
+
+
+def _workspace_runs(all_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ws_run_ids = set(_active_workspace().get("run_ids", []))
+    return [run for run in all_runs if run["run_id"] in ws_run_ids]
 
 
 def _run_root(run_id: str) -> Path:
@@ -156,6 +241,40 @@ def _detect_phase() -> str:
     if not missing:
         return "confirmation"
     return "elicitation"
+
+
+def _record_workspace_run(run_id: str) -> None:
+    ws = _active_workspace()
+    run_ids = ws.setdefault("run_ids", [])
+    if run_id in run_ids:
+        run_ids.remove(run_id)
+    run_ids.insert(0, run_id)
+
+
+def _record_run_label(run_id: str) -> None:
+    resolved = st.session_state.sheet.resolved_state().get("resolved", {})
+    material = resolved.get("resolved_material") or {}
+    section = resolved.get("resolved_section") or {}
+    scenario = _scenario_label(str(resolved.get("scenario") or get_sheet_scenario(st.session_state.sheet) or ""))
+    force = _format_force_label(resolved)
+    material_name = material.get("name") or st.session_state.sheet.to_dict().get("material_hint") or "material"
+    section_name = (
+        section.get("Profile")
+        or section.get("Section")
+        or section.get("shape")
+        or st.session_state.sheet.to_dict().get("section_hint")
+        or "section"
+    )
+    st.session_state.run_labels[run_id] = f"{scenario}/{force}/{material_name}/{section_name} ({run_id[-6:]})"
+
+
+def _start_new_chat() -> None:
+    _save_active_workspace_state()
+    st.session_state.workspace_counter += 1
+    ws_id = _create_workspace_id()
+    st.session_state.workspaces[ws_id] = _default_workspace(st.session_state.workspace_counter)
+    st.session_state.active_workspace_id = ws_id
+    _load_workspace_state(ws_id)
 
 
 def _process_message(user_text: str) -> None:
@@ -215,10 +334,12 @@ def _process_message(user_text: str) -> None:
             run_output = str(run_full_pipeline.invoke(build_pipeline_kwargs_from_sheet(sheet))).strip()
             if is_successful_run_output(run_output):
                 st.session_state.last_run_id, _ = extract_run_id_and_folder(run_output)
-                st.session_state.selected_run_id = st.session_state.last_run_id
                 st.session_state.simulation_executed = True
                 st.session_state.last_executed_signature = get_sheet_signature(sheet)
                 st.session_state.verification_prompt_pending = True
+                if st.session_state.last_run_id:
+                    _record_workspace_run(st.session_state.last_run_id)
+                    _record_run_label(st.session_state.last_run_id)
                 out = build_post_success_message(run_output)
             else:
                 out = run_output
@@ -260,38 +381,154 @@ def _inject_css() -> None:
     )
 
 
+def _safe_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return None
+
+
+def _render_parameter_summary() -> None:
+    sheet = st.session_state.sheet
+    resolved_state = sheet.resolved_state()
+    values = sheet.to_dict()
+    resolved = resolved_state.get("resolved", {})
+    missing = resolved_state.get("missing", [])
+
+    section = resolved.get("resolved_section") or {}
+    material = resolved.get("resolved_material") or {}
+
+    st.write("Current Inputs")
+    length_value = values.get("length_m")
+    length_display = f"{length_value} m" if length_value not in (None, "") else "-"
+    force_value = values.get("FY")
+    force_unit = values.get("force_unit") or "N"
+    force_display = f"{force_value} {force_unit}" if force_value not in (None, "") else "-"
+    st.table(
+        {
+            "Field": [
+                "scenario",
+                "length_m",
+                "n_elems",
+                "FY",
+                "material",
+                "section",
+            ],
+            "Value": [
+                values.get("scenario") or "-",
+                length_display,
+                values.get("n_elems") or "-",
+                force_display,
+                material.get("name") or values.get("material_hint") or "-",
+                section.get("Profile") or section.get("Section") or section.get("shape") or values.get("section_hint") or "-",
+            ],
+        }
+    )
+    if missing:
+        st.warning(f"Missing required: {', '.join(missing)}")
+    else:
+        st.success("All required inputs are collected. Type `yes` in chat to run.")
+
+
+def _run_selector(label: str, runs: list[dict[str, Any]], key: str, default_run: str | None = None) -> str | None:
+    if not runs:
+        st.info("No runs in this chat workspace yet.")
+        return None
+
+    run_ids = [r["run_id"] for r in runs]
+    run_label_map = {rid: _run_display_name(next(r for r in runs if r["run_id"] == rid)) for rid in run_ids}
+
+    index = 0
+    if default_run in run_ids:
+        index = run_ids.index(default_run)
+
+    return st.selectbox(label, run_ids, index=index, key=key, format_func=lambda rid: run_label_map[rid])
+
+
+def _render_verification_reports(run_id: str) -> None:
+    root = _run_root(run_id)
+    manual_path = root / "verification" / "manual" / "report.txt"
+    opensees_path = root / "verification" / "opensees" / "report.txt"
+    comparison_path = root / "verification" / "comparison" / "comparison_report.txt"
+
+    st.write("Comparison Report")
+    if comparison_path.exists():
+        st.text(comparison_path.read_text(encoding="utf-8", errors="replace")[:40000])
+    else:
+        st.info("No comparison report yet.")
+
+    report_choice = st.selectbox(
+        "Verification Detail",
+        ["OpenSees Report", "Manual Report"],
+        key=f"verification_detail_selector_{run_id}",
+    )
+    if report_choice == "OpenSees Report":
+        if opensees_path.exists():
+            st.text(opensees_path.read_text(encoding="utf-8", errors="replace")[:40000])
+        else:
+            st.info("No OpenSees report yet.")
+    else:
+        if manual_path.exists():
+            st.text(manual_path.read_text(encoding="utf-8", errors="replace")[:40000])
+        else:
+            st.info("No manual report yet.")
+
+
 def main() -> None:
-    st.set_page_config(page_title="Beam Analysis Assistant", layout="wide")
+    st.set_page_config(page_title="AI Assistant for Beam Analysis", layout="wide")
     _inject_css()
     _ensure_state()
 
-    runs = _query_runs()
+    all_runs = _query_runs()
+    runs = _workspace_runs(all_runs)
+    workspace = _active_workspace()
 
-    st.title("Beam Analysis Assistant")
+    st.title("AI Assistant for Beam Analysis")
+    st.caption("FEM Core: Code_Aster & OpenSees")
+
     top_l, top_r = st.columns([3, 2])
     with top_l:
-        st.caption(f"Phase: {_detect_phase()}")
+        st.caption(f"Workspace: {workspace['name']} | Phase: {_detect_phase()}")
     with top_r:
-        c1, c2, c3 = st.columns(3)
-        if c1.button("Refresh Runs", use_container_width=True):
-            st.rerun()
-        if c2.button("Confirm And Run", use_container_width=True):
-            _process_message("yes")
-            st.rerun()
-        if c3.button("New Session", use_container_width=True):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
+        if st.button("New Chat", use_container_width=True):
+            _start_new_chat()
             st.rerun()
 
     with st.sidebar:
+        ws_ids = list(st.session_state.workspaces.keys())
+        ws_names = {wid: st.session_state.workspaces[wid]["name"] for wid in ws_ids}
+        current_ws = st.selectbox(
+            "Chat Workspace",
+            ws_ids,
+            index=ws_ids.index(st.session_state.active_workspace_id),
+            format_func=lambda wid: ws_names[wid],
+            key="workspace_selector",
+        )
+        if current_ws != st.session_state.active_workspace_id:
+            _save_active_workspace_state()
+            st.session_state.active_workspace_id = current_ws
+            _load_workspace_state(current_ws)
+            st.rerun()
+
         st.subheader("Run Explorer")
-        run_ids = [r["run_id"] for r in runs]
-        default_idx = 0
-        if st.session_state.selected_run_id in run_ids:
-            default_idx = run_ids.index(st.session_state.selected_run_id)
-        if run_ids:
-            st.session_state.selected_run_id = st.selectbox("Selected Run", run_ids, index=default_idx)
-        st.dataframe(runs, use_container_width=True, hide_index=True)
+        selected_explorer_run = _run_selector(
+            "Run",
+            runs,
+            key="run_explorer_selector",
+            default_run=st.session_state.last_run_id,
+        )
+        if runs:
+            rows = []
+            for run in runs:
+                rows.append(
+                    {
+                        "name": _run_display_name(run),
+                        "status": run["status"],
+                        "verification": run["verification"],
+                        "created_at": run["created_at"],
+                    }
+                )
+            st.dataframe(rows, use_container_width=True, hide_index=True)
 
     col_chat, col_info = st.columns([2.1, 1.2], gap="small")
     with col_chat:
@@ -302,28 +539,19 @@ def main() -> None:
         msg = st.chat_input("Type your request (or yes to run).")
         if msg:
             _process_message(msg)
+            _save_active_workspace_state()
             st.rerun()
 
     with col_info:
         st.subheader("Parameter Sheet")
-        resolved = st.session_state.sheet.resolved_state()
-        st.json(
-            {
-                "values": st.session_state.sheet.to_dict(),
-                "missing": resolved.get("missing", []),
-                "notes": resolved.get("notes", []),
-            },
-            expanded=False,
-        )
+        _render_parameter_summary()
 
-    selected_run = st.session_state.selected_run_id or st.session_state.last_run_id
     tabs = st.tabs(["Results", "Artifacts", "Verification", "Compare"])
 
     with tabs[0]:
-        if not selected_run:
-            st.info("Select a run.")
-        else:
-            imgs = [a for a in _collect_artifacts(selected_run) if a["stage"] == "viz" and a["kind"] == "image"]
+        run_id = _run_selector("Run for Results", runs, key="run_results_selector", default_run=selected_explorer_run)
+        if run_id:
+            imgs = [a for a in _collect_artifacts(run_id) if a["stage"] == "viz" and a["kind"] == "image"]
             if not imgs:
                 st.info("No generated figures yet.")
             else:
@@ -332,16 +560,38 @@ def main() -> None:
                     cols[idx % 3].image(item["path"], caption=item["label"], use_container_width=True)
 
     with tabs[1]:
-        if not selected_run:
-            st.info("Select a run.")
-        else:
-            artifacts = _collect_artifacts(selected_run)
-            labels = [a["label"] for a in artifacts]
+        run_id = _run_selector("Run for Artifacts", runs, key="run_artifacts_selector", default_run=selected_explorer_run)
+        if run_id:
+            root = _run_root(run_id)
+            st.caption(str(root))
+
+            st.write("Code_Aster Output Files")
+            for file_name in ["beam_job.mess", "beam_job.resu", "tab_disp.txt", "tab_sie.txt", "tab_reac.txt"]:
+                path = root / "outputs" / file_name
+                if path.exists():
+                    with st.expander(file_name):
+                        st.text(path.read_text(encoding="utf-8", errors="replace")[:40000])
+
+            input_artifacts = []
+            for path in sorted((root / "inputs").glob("*")):
+                if not path.is_file():
+                    continue
+                if path.suffix.lower() not in {".comm", ".geo"}:
+                    continue
+                input_artifacts.append(
+                    {
+                        "label": path.name,
+                        "path": str(path.resolve()),
+                        "kind": _artifact_kind(path),
+                    }
+                )
+
+            labels = [a["label"] for a in input_artifacts]
             if not labels:
-                st.info("No artifacts found.")
+                st.info("No run input files found.")
             else:
-                sel = st.selectbox("Artifact", labels, key="artifact_sel")
-                art = next(a for a in artifacts if a["label"] == sel)
+                sel = st.selectbox("run input files", labels, key="run_input_file_sel")
+                art = next(a for a in input_artifacts if a["label"] == sel)
                 path = Path(art["path"])
                 st.caption(str(path))
                 if art["kind"] == "image":
@@ -354,38 +604,57 @@ def main() -> None:
                     st.warning("Binary artifact preview is not supported.")
 
     with tabs[2]:
-        if not selected_run:
-            st.info("Select a run.")
-        else:
-            st.caption("Verification is run-specific and stored under run/verification/")
-            if st.button("Run Verification"):
-                out = run_verification_for_run(selected_run)
+        run_id = _run_selector("Run for Verification", runs, key="run_verification_selector", default_run=selected_explorer_run)
+        if run_id:
+            st.caption("Verification is run-specific. Three reports are shown below for the selected run.")
+            if st.button("Run Verification", key="verify_btn"):
+                out = run_verification_for_run(run_id)
                 st.session_state.chat_messages.append({"role": "assistant", "content": out})
+                _save_active_workspace_state()
                 st.rerun()
+            _render_verification_reports(run_id)
 
     with tabs[3]:
-        if not selected_run:
-            st.info("Select a run.")
+        if not runs:
+            st.info("No runs in this chat workspace yet.")
         else:
-            images = [a for a in _collect_artifacts(selected_run) if a["kind"] == "image"]
-            if not images:
-                st.info("No image artifacts to compare.")
+            run_to_images = {
+                run["run_id"]: [a for a in _collect_artifacts(run["run_id"]) if a["stage"] == "viz" and a["kind"] == "image"]
+                for run in runs
+            }
+            chart_types = sorted({Path(img["path"]).name for images in run_to_images.values() for img in images})
+            if not chart_types:
+                st.info("No image charts found in runs.")
             else:
-                labels = ["(empty)"] + [a["label"] for a in images]
+                selected_chart = st.selectbox("Chart Type", chart_types, key="cmp_chart_type")
+                run_ids = [r["run_id"] for r in runs]
+                run_label_map = {rid: _run_display_name(next(r for r in runs if r["run_id"] == rid)) for rid in run_ids}
+                run_labels = ["(empty)"] + run_ids
                 c1, c2, c3, c4 = st.columns(4)
-                picks = [
-                    c1.selectbox("A", labels, key="cmp_a"),
-                    c2.selectbox("B", labels, key="cmp_b"),
-                    c3.selectbox("C", labels, key="cmp_c"),
-                    c4.selectbox("D", labels, key="cmp_d"),
+                selected_runs = [
+                    c1.selectbox("A", run_labels, key="cmp_run_a", format_func=lambda rid: "(empty)" if rid == "(empty)" else run_label_map[rid]),
+                    c2.selectbox("B", run_labels, key="cmp_run_b", format_func=lambda rid: "(empty)" if rid == "(empty)" else run_label_map[rid]),
+                    c3.selectbox("C", run_labels, key="cmp_run_c", format_func=lambda rid: "(empty)" if rid == "(empty)" else run_label_map[rid]),
+                    c4.selectbox("D", run_labels, key="cmp_run_d", format_func=lambda rid: "(empty)" if rid == "(empty)" else run_label_map[rid]),
                 ]
+
                 grid1, grid2 = st.columns(2)
                 slots = [grid1, grid2, grid1, grid2]
-                for idx, pick in enumerate(picks):
-                    if pick == "(empty)":
+                for idx, chosen_run in enumerate(selected_runs):
+                    if chosen_run == "(empty)":
                         continue
-                    item = next(a for a in images if a["label"] == pick)
-                    slots[idx].image(item["path"], caption=item["label"], use_container_width=True)
+                    matched = next(
+                        (img for img in run_to_images.get(chosen_run, []) if Path(img["path"]).name == selected_chart),
+                        None,
+                    )
+                    if matched:
+                        slots[idx].image(
+                            matched["path"],
+                            caption=f"{_run_display_name(next(r for r in runs if r['run_id'] == chosen_run))} | {selected_chart}",
+                            use_container_width=True,
+                        )
+                    else:
+                        slots[idx].warning(f"{selected_chart} not found in selected run.")
 
 
 if __name__ == "__main__":
