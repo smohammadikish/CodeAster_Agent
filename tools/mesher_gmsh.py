@@ -5,11 +5,29 @@
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 from langchain_core.tools import tool
 
 from env_loader import load_env
 from storage import resolve_workspace_file
+
+
+def _resolve_executable(bin_value: str) -> str | None:
+    """
+    Resolve an executable from either:
+    - an absolute/relative file path
+    - a command name on PATH
+    """
+    candidate = (bin_value or "").strip().strip('"').strip("'")
+    if not candidate:
+        return None
+
+    direct = Path(candidate)
+    if direct.is_file():
+        return str(direct)
+
+    return shutil.which(candidate)
 
 
 @tool("mesh_with_gmsh", return_direct=False)
@@ -24,11 +42,11 @@ def mesh_with_gmsh_tool(
     """
 
     gmsh_bin, *_ = load_env()
-    gmsh_path = shutil.which(gmsh_bin)
+    gmsh_path = _resolve_executable(gmsh_bin)
 
     if gmsh_path is None:
         return (
-            f"âŒ Error: '{gmsh_bin}' not found.\n"
+            f"ERROR: Gmsh executable not found: '{gmsh_bin}'.\n"
             "Please install Gmsh or set GMSH_BIN correctly in your .env file.\n"
             "Example:\nGMSH_BIN=C:\\Program Files\\Gmsh\\gmsh.exe"
         )
@@ -37,7 +55,7 @@ def mesh_with_gmsh_tool(
     med_path = resolve_workspace_file(med_name, "inputs", run_id or None)
 
     if not os.path.exists(geo_path):
-        return f"âŒ Error: input file '{geo_path}' not found."
+        return f"ERROR: Input file '{geo_path}' not found."
 
     gmsh_opts = [
         "-setnumber",
@@ -57,21 +75,21 @@ def mesh_with_gmsh_tool(
 
         if result.returncode != 0:
             return (
-                "âš ï¸ Gmsh failed.\n"
+                "ERROR: Gmsh command failed.\n"
                 f"Command: {' '.join(cmd)}\n"
                 f"stderr:\n{result.stderr}\n"
                 f"stdout:\n{result.stdout}"
             )
 
         if not os.path.exists(med_path):
-            return f"âš ï¸ Gmsh finished but output file '{med_path}' not found."
+            return f"ERROR: Gmsh finished but output file '{med_path}' was not created."
 
         return (
-            f"âœ… Meshing completed successfully.\n"
+            "Meshing completed successfully.\n"
             f"MED file saved at: {med_path.resolve()}\n"
-            f"ðŸ”§ MED version forced to 4.0.0 for Code_Aster compatibility.\n\n"
+            "MED version forced to 4.0.0 for Code_Aster compatibility.\n\n"
             f"--- Gmsh Output (first 500 chars) ---\n{result.stdout[:500]}..."
         )
 
     except Exception as e:
-        return f"âŒ Exception while running Gmsh: {e}"
+        return f"ERROR: Exception while running Gmsh: {e}"
