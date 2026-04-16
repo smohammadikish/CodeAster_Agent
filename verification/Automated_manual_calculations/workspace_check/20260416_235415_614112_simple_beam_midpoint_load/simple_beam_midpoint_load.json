@@ -1,0 +1,33 @@
+{
+  "model_id": "simple_beam_midpoint_load_example",
+  "case_type": "simply_supported_midspan_point_load",
+  "beam": {
+    "length": 6.0,
+    "num_elements": 20
+  },
+  "material": {
+    "name": "Steel S355",
+    "E": 210000000000.0,
+    "rho": 7850.0
+  },
+  "section": {
+    "A": 0.025,
+    "Iy": 6.0e-6,
+    "Iz": 6.0e-6,
+    "width": 0.15,
+    "height": 0.2
+  },
+  "load": {
+    "type": "point_force",
+    "magnitude": 12.0,
+    "direction": "y_negative"
+  },
+  "analysis": {
+    "stations": 31,
+    "response_positions": [
+      0.0,
+      3.0,
+      6.0
+    ]
+  }
+}

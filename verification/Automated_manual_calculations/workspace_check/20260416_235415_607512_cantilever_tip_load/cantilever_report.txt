@@ -1,0 +1,48 @@
+Structural Analysis Report - Cantilever Beam with End Point Load
+
+1. Introduction
+This report presents the structural analysis of a cantilever beam subjected to a concentrated load at its free end.
+
+2. Problem Definition
+Beam length: L = 4.0 m
+Load at free end: P = 10.0 N
+
+3. Static Equilibrium Equations
+Sum of vertical forces: SFy = 0
+Sum of moments about A: SMA = 0
+
+4. Support Reactions
+RA = P
+MA = P x L
+RA = 10.0 N
+MA = 40.0 Nm
+
+5. Maximum Bending Moment
+Mmax = P x L
+Mmax = 40.0 Nm
+
+6. Beam Deflection
+dmax = (P x L^3) / (3 x E x I)
+E = 210000000000.0 Pa
+I = 4.1e-06 m^4
+dmax = -0.00024777389082462247 m
+
+7. Geometric Properties
+Length L = 4.0 m
+Cross-sectional Area A = 0.02 m^2
+Moment of Inertia (Iz) = 4.1e-06 m^4
+
+8. Material Properties
+Material: Steel S235
+Young's Modulus E = 210000000000.0 Pa
+
+9. Results Summary
+Beam length = 4.0 m
+Reaction at fixed support = 10.0 N
+Support moment = 40.0 Nm
+Maximum bending moment = 40.0 Nm
+Free-end deflection = -0.00024777389082462247 m
+Free-end rotation = -9.291521486643443e-05 rad
+
+10. Conclusion
+The beam behavior is acceptable / not acceptable.

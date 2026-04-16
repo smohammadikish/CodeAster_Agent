@@ -73,6 +73,12 @@
         },
         "Iz": {
           "type": "number"
+        },
+        "width": {
+          "type": "number"
+        },
+        "height": {
+          "type": "number"
         }
       }
     },
@@ -83,6 +89,9 @@
         "E"
       ],
       "properties": {
+        "name": {
+          "type": "string"
+        },
         "E": {
           "type": "number"
         },

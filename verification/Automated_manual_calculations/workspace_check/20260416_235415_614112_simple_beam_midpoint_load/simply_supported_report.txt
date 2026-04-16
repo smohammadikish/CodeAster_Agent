@@ -1,0 +1,46 @@
+Structural Analysis Report - Simply Supported Beam
+
+1. Introduction
+This report presents the structural analysis of a simply supported beam subjected to a concentrated load at midspan.
+
+2. Problem Definition
+Beam length: L = 6.0 m
+Load at midspan: P = 12.0 N
+
+3. Static Equilibrium Equations
+Sum of vertical forces: SFy = 0
+Sum of moments about A: SMA = 0
+
+4. Support Reactions
+RA = RB = P / 2
+RA = 6.0 N
+RB = 6.0 N
+
+5. Maximum Bending Moment
+Mmax = (P x L) / 4
+Mmax = 18.0 Nm
+
+6. Beam Deflection
+dmax = (P x L^3) / (48 x E x I)
+E = 210000000000.0 Pa
+I = 6e-06 m^4
+dmax = -4.285713221428553e-05 m
+
+7. Geometric Properties
+Length L = 6.0 m
+Cross-sectional Area A = 0.025 m^2
+Moment of Inertia (Iz) = 6e-06 m^4
+
+8. Material Properties
+Material: Steel S355
+Young's Modulus E = 210000000000.0 Pa
+
+9. Results Summary
+Beam length = 6.0 m
+Reaction at A = 6.0 N
+Reaction at B = 6.0 N
+Maximum bending moment = 18.0 Nm
+Midspan deflection = -4.285713221428553e-05 m
+
+10. Conclusion
+The beam behavior is acceptable / not acceptable.

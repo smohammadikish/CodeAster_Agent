@@ -1,0 +1,32 @@
+{
+  "model_id": "cantilever_tip_load_example",
+  "case_type": "cantilever_tip_load",
+  "beam": {
+    "length": 4.0,
+    "num_elements": 20
+  },
+  "material": {
+    "name": "Steel S235",
+    "E": 210000000000.0,
+    "rho": 7850.0
+  },
+  "section": {
+    "A": 0.02,
+    "Iy": 4.1e-6,
+    "Iz": 4.1e-6,
+    "width": 0.1,
+    "height": 0.2
+  },
+  "load": {
+    "type": "point_force",
+    "magnitude": 10.0,
+    "direction": "y_negative"
+  },
+  "analysis": {
+    "stations": 21,
+    "response_positions": [
+      0.0,
+      4.0
+    ]
+  }
+}

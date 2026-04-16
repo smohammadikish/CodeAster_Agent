@@ -1637,23 +1637,33 @@ def _canonical_load_result(model: BeamModel) -> dict[str, Any]:
     }
 
 
-def _canonical_section(section: dict[str, Any]) -> dict[str, float]:
-    filtered = {
+def _canonical_section(section: dict[str, Any]) -> dict[str, Any]:
+    filtered: dict[str, Any] = {
         key: float(section[key])
         for key in ("A", "Iy", "Iz")
         if key in section
     }
+    # Optionally include width and height if available
+    for key in ("width", "height"):
+        if key in section:
+            try:
+                filtered[key] = float(section[key])
+            except (TypeError, ValueError):
+                pass
     if "A" not in filtered or "Iz" not in filtered:
         raise ValueError("Canonical output requires section.A and section.Iz.")
     return filtered
 
 
-def _canonical_material(material: dict[str, Any]) -> dict[str, float]:
-    filtered = {
+def _canonical_material(material: dict[str, Any]) -> dict[str, Any]:
+    filtered: dict[str, Any] = {
         key: float(material[key])
         for key in ("E", "nu", "rho")
         if key in material
     }
+    # Optionally include material name if available
+    if "name" in material:
+        filtered["name"] = str(material["name"])
     if "E" not in filtered:
         raise ValueError("Canonical output requires material.E.")
     return filtered

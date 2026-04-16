@@ -23,15 +23,64 @@
         },
         "section": {
           "type": "object",
-          "description": "Free-form section properties. For displacement calculation, provide a positive inertia such as Iz, Izz, Iy, Ix, or I.",
+          "description": "Cross-sectional properties. For displacement calculation, provide a positive inertia such as Iz, Iy, or I.",
           "default": {},
-          "additionalProperties": true
+          "additionalProperties": true,
+          "properties": {
+            "A": {
+              "type": "number",
+              "description": "Cross-sectional area (m^2)",
+              "exclusiveMinimum": 0
+            },
+            "Iz": {
+              "type": "number",
+              "description": "Second moment of inertia about Z-axis (m^4)",
+              "exclusiveMinimum": 0
+            },
+            "Iy": {
+              "type": "number",
+              "description": "Second moment of inertia about Y-axis (m^4)",
+              "exclusiveMinimum": 0
+            },
+            "width": {
+              "type": "number",
+              "description": "Section width (m)",
+              "exclusiveMinimum": 0
+            },
+            "height": {
+              "type": "number",
+              "description": "Section height (m)",
+              "exclusiveMinimum": 0
+            }
+          }
         },
         "material": {
           "type": "object",
-          "description": "Free-form material properties. For displacement calculation, provide a positive E.",
+          "description": "Material properties. For displacement calculation, provide a positive elastic modulus E.",
           "default": {},
-          "additionalProperties": true
+          "additionalProperties": true,
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Material designation (e.g., 'Steel S235', 'Concrete C30')"
+            },
+            "E": {
+              "type": "number",
+              "description": "Young's modulus of elasticity (Pa)",
+              "exclusiveMinimum": 0
+            },
+            "nu": {
+              "type": "number",
+              "description": "Poisson's ratio",
+              "minimum": -1,
+              "maximum": 0.5
+            },
+            "rho": {
+              "type": "number",
+              "description": "Material density (kg/m^3)",
+              "exclusiveMinimum": 0
+            }
+          }
         }
       }
     },

@@ -5,7 +5,7 @@ This report presents the structural analysis of a cantilever beam subjected to a
 
 2. Problem Definition
 Beam length: L = {{ beam.length }} m
-Load at free end: P = ______ N
+Load at free end: P = {{ load.magnitude }} N
 
 3. Static Equilibrium Equations
 Sum of vertical forces: SFy = 0
@@ -23,20 +23,18 @@ Mmax = {{ extrema.bending_moment.max_abs }} Nm
 
 6. Beam Deflection
 dmax = (P x L^3) / (3 x E x I)
-E = ______ Pa
-I = ______ m^4
+E = {{ material.E }} Pa
+I = {{ section.Iz }} m^4
 dmax = {{ displacements.free_end.uy }} m
 
 7. Geometric Properties
 Length L = {{ beam.length }} m
-Width b = ______ m
-Height h = ______ m
-I = (b x h^3) / 12
-I = ______ m^4
+Cross-sectional Area A = {{ section.A }} m^2
+Moment of Inertia (Iz) = {{ section.Iz }} m^4
 
 8. Material Properties
-Material: ______
-Young's Modulus E = ______ Pa
+Material: {{ material.name }}
+Young's Modulus E = {{ material.E }} Pa
 
 9. Results Summary
 Beam length = {{ beam.length }} m

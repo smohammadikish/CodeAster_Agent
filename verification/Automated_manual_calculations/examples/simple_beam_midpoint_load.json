@@ -6,13 +6,16 @@
     "num_elements": 20
   },
   "material": {
+    "name": "Steel S355",
     "E": 210000000000.0,
     "rho": 7850.0
   },
   "section": {
     "A": 0.025,
     "Iy": 6.0e-6,
-    "Iz": 6.0e-6
+    "Iz": 6.0e-6,
+    "width": 0.15,
+    "height": 0.2
   },
   "load": {
     "type": "point_force",

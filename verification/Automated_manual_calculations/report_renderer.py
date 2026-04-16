@@ -32,8 +32,20 @@ def _supports_by_name(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def _build_template_context(result: dict[str, Any]) -> dict[str, Any]:
     """Build the context object passed into the Word template."""
+    # Ensure material and section have default values for optional fields
+    material = result.get("material", {})
+    if "name" not in material:
+        material = {**material, "name": "Unspecified"}
+    
+    section = result.get("section", {})
+    for key in ("width", "height"):
+        if key not in section:
+            section = {**section, key: None}
+    
     context = {
         **result,
+        "material": material,
+        "section": section,
         "supports_by_name": _supports_by_name(result),
     }
     case_type = result.get("case_type")
@@ -78,19 +90,29 @@ def _build_template_context(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_placeholder_value(context: dict[str, Any], expression: str) -> Any:
-    """Resolve dotted placeholders with optional list indexes."""
+    """Resolve dotted placeholders with optional list indexes.
+    
+    Returns the value, or a placeholder string if the path doesn't exist.
+    """
     token_pattern = re.compile(r"([a-zA-Z_]\w*)|\[(\d+)\]")
     current: Any = context
-    for match in token_pattern.finditer(expression.strip()):
-        key = match.group(1)
-        index = match.group(2)
-        if key is not None:
-            if not isinstance(current, dict):
-                raise KeyError(expression)
-            current = current[key]
-            continue
-        current = current[int(index)]
-    return current
+    try:
+        for match in token_pattern.finditer(expression.strip()):
+            key = match.group(1)
+            index = match.group(2)
+            if key is not None:
+                if not isinstance(current, dict):
+                    return f"[{expression}]"
+                current = current.get(key)
+                if current is None:
+                    return f"[{expression}]"
+                continue
+            if not isinstance(current, (list, tuple)):
+                return f"[{expression}]"
+            current = current[int(index)]
+        return current
+    except (KeyError, IndexError, TypeError, ValueError):
+        return f"[{expression}]"
 
 
 def _render_text_template(template_text: str, context: dict[str, Any]) -> str:
