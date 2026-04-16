@@ -1,183 +1,743 @@
-# ----------------------------
-#  tools/visualize_tool.py
-# ----------------------------
-
-
 import os
 import re
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from langchain_core.tools import tool  # ✅ Updated for LangChain 1.x
+from langchain_core.tools import tool
 
 from storage import resolve_workspace_file
-from units import (DEFAULT_UNIT_POLICY, convert_force, convert_length,
-                   convert_moment)
+from units import (
+    DEFAULT_UNIT_POLICY,
+    convert_force,
+    convert_length,
+    convert_moment,
+)
 
 
-# ============================================================
-# 🟦 TOOL 1 — DEFLECTION + ROTATION
-# ============================================================
+FIG_DPI = 260
+FORCED_DISP_UNIT = "mm"
+
+
+def _apply_plot_style(ax, title: str, xlabel: str, ylabel: str, show_zero: bool = True) -> None:
+    ax.set_title(title, fontsize=12, fontweight="bold", pad=10)
+    ax.set_xlabel(xlabel, fontsize=10)
+    ax.set_ylabel(ylabel, fontsize=10)
+    ax.grid(True, which="major", linestyle="--", linewidth=0.7, alpha=0.45)
+    ax.grid(True, which="minor", linestyle=":", linewidth=0.5, alpha=0.25)
+    ax.minorticks_on()
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["left"].set_linewidth(1.1)
+    ax.spines["bottom"].set_linewidth(1.1)
+    if show_zero:
+        ax.axhline(0.0, color="#444444", linewidth=1.0, alpha=0.8)
+
+
+def _ensure_zero_in_ylim(ax, pad_ratio: float = 0.08) -> None:
+    y_min, y_max = ax.get_ylim()
+    span = max(y_max - y_min, 1e-9)
+    pad = pad_ratio * span
+    new_min = min(y_min, -pad)
+    new_max = max(y_max, pad)
+    ax.set_ylim(new_min, new_max)
+
+
+def _annotate_extreme(ax, x: np.ndarray, y: np.ndarray, unit_label: str, color: str) -> float:
+    if y.size == 0:
+        return 0.0
+    idx = int(np.argmax(np.abs(y)))
+    extreme = float(y[idx])
+    span = max(float(np.max(y) - np.min(y)), 1e-9)
+    y_offset = 0.14 * span if extreme < 0 else 0.10 * span
+    va = "bottom" if extreme >= 0 else "top"
+    text_y = extreme + y_offset if extreme >= 0 else extreme - y_offset
+    x_min = float(np.min(x))
+    x_max = float(np.max(x))
+    if abs(x[idx] - x_max) < 0.06 * max(x_max - x_min, 1e-9):
+        ha = "right"
+    elif abs(x[idx] - x_min) < 0.06 * max(x_max - x_min, 1e-9):
+        ha = "left"
+    else:
+        ha = "center"
+
+    ax.scatter([x[idx]], [extreme], color=color, s=40, zorder=5)
+    ax.text(
+        x[idx],
+        text_y,
+        f"{extreme:.3f} {unit_label}",
+        color=color,
+        fontsize=9,
+        ha=ha,
+        va=va,
+        fontweight="bold",
+        bbox=dict(facecolor="white", edgecolor="none", alpha=0.85, pad=1.0),
+    )
+    return extreme
+
+
+def _safe_node_id(value: str) -> int:
+    token = value.strip().upper()
+    if not token.startswith("N"):
+        raise ValueError("Invalid node token")
+    return int(token[1:])
+
+
+def _node_order_key(node_id: int) -> tuple[int, int]:
+    return (0, node_id)
+
+
+def _parse_disp_state(disp_path: Path) -> dict[int, tuple[float, float]]:
+    if not os.path.exists(disp_path):
+        return {}
+
+    node_state: dict[int, tuple[float, float]] = {}
+    with open(disp_path, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            if re.search(r"\bN\d+\b", line) is None:
+                continue
+            parts = line.strip().split()
+            try:
+                node_index = next(i for i, token in enumerate(parts) if re.fullmatch(r"N\d+", token))
+            except StopIteration:
+                continue
+            if len(parts) <= node_index + 1:
+                continue
+            try:
+                node_id = _safe_node_id(parts[node_index])
+                x_val = float(parts[node_index + 1])
+                dy_val = float(parts[node_index + 4]) if len(parts) > node_index + 4 else 0.0
+            except ValueError:
+                continue
+            node_state[node_id] = (x_val, dy_val)
+    return node_state
+
+
+def _parse_disp_rows(disp_path: Path) -> dict[int, float]:
+    state = _parse_disp_state(disp_path)
+    return {node_id: values[0] for node_id, values in state.items()}
+
+
+def _parse_disp_table_rows(disp_path: Path) -> list[tuple[int, float, float, float]]:
+    rows: list[tuple[int, float, float, float]] = []
+    if not os.path.exists(disp_path):
+        return rows
+
+    with open(disp_path, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            if re.search(r"\bN\d+\b", line) is None:
+                continue
+            parts = line.strip().split()
+            try:
+                node_index = next(i for i, token in enumerate(parts) if re.fullmatch(r"N\d+", token))
+            except StopIteration:
+                continue
+            if len(parts) <= node_index + 8:
+                continue
+            try:
+                node_id = _safe_node_id(parts[node_index])
+                x_val = float(parts[node_index + 1])
+                dy_val = float(parts[node_index + 4])
+                drz_val = float(parts[node_index + 8])
+            except ValueError:
+                continue
+            rows.append((node_id, x_val, dy_val, drz_val))
+    return rows
+
+
+def _build_axis_from_nodes(node_ids: list[int], run_id: str) -> np.ndarray:
+    if not node_ids:
+        return np.array([], dtype=float)
+
+    disp_path = resolve_workspace_file("tab_disp.txt", "outputs", run_id or None)
+    node_x = _parse_disp_rows(disp_path)
+    if node_x:
+        missing = [nid for nid in node_ids if nid not in node_x]
+        if not missing:
+            return np.array([node_x[nid] for nid in node_ids], dtype=float)
+
+    geo_path = resolve_workspace_file("model.geo", "inputs", run_id or None)
+    beam_length_raw, _ = _read_geo_model(geo_path)
+    if beam_length_raw is None or beam_length_raw <= 0:
+        beam_length_raw = float(max(len(node_ids) - 1, 1))
+
+    ordered = sorted(node_ids)
+    x_line = np.linspace(0.0, beam_length_raw, len(ordered))
+    x_map = {nid: x_line[i] for i, nid in enumerate(ordered)}
+    return np.array([x_map[nid] for nid in node_ids], dtype=float)
+
+
+def _parse_sie_rows(stress_path: Path) -> list[dict[str, float]]:
+    header: list[str] | None = None
+    rows: list[dict[str, float]] = []
+
+    with open(stress_path, "r", encoding="utf-8", errors="ignore") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if ";" not in line:
+                continue
+
+            parts = [part.strip() for part in raw_line.split(";")]
+            if "NOEUD" in parts and "VY" in parts and "MFZ" in parts:
+                header = parts
+                continue
+
+            if header is None:
+                continue
+
+            if len(parts) < len(header):
+                continue
+
+            record = {header[i]: parts[i] for i in range(len(header))}
+            node_token = record.get("NOEUD", "")
+            if not node_token.startswith("N"):
+                continue
+
+            try:
+                rows.append(
+                    {
+                        "node": _safe_node_id(node_token),
+                        "x": float(record.get("COOR_X", "nan")),
+                        "vy": float(record.get("VY", "nan")),
+                        "mfz": float(record.get("MFZ", "nan")),
+                    }
+                )
+            except (ValueError, TypeError):
+                continue
+
+    rows = [row for row in rows if not np.isnan(row["vy"]) and not np.isnan(row["mfz"])]
+    if rows and any(not np.isnan(r["x"]) for r in rows):
+        rows.sort(key=lambda item: (float(item["x"]) if not np.isnan(item["x"]) else float("inf"), int(item["node"])))
+    else:
+        rows.sort(key=lambda item: int(item["node"]))
+    return rows
+
+
+def _read_reactions(reac_path: Path) -> dict[str, float | str] | None:
+    reactions = _read_reactions_all(reac_path)
+    return reactions[0] if reactions else None
+
+
+def _read_reactions_all(reac_path: Path) -> list[dict[str, float | str]]:
+    if not os.path.exists(reac_path):
+        return []
+
+    reactions: list[dict[str, float | str]] = []
+
+    with open(reac_path, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            if re.search(r"\bN\d+\b", line) is None:
+                continue
+
+            parts = line.strip().split()
+            try:
+                node_index = next(i for i, token in enumerate(parts) if re.fullmatch(r"N\d+", token))
+            except StopIteration:
+                continue
+
+            if len(parts) < node_index + 9:
+                continue
+
+            try:
+                x = float(parts[node_index + 1])
+                fx = float(parts[node_index + 3])
+                fy = float(parts[node_index + 4])
+                mz = float(parts[node_index + 8])
+            except ValueError:
+                continue
+
+            reactions.append(
+                {
+                    "node": parts[node_index],
+                    "X": x,
+                    "Fx": fx,
+                    "Fy": fy,
+                    "Fz": 0.0,
+                    "Mx": 0.0,
+                    "My": 0.0,
+                    "Mz": mz,
+                }
+            )
+
+    reactions.sort(key=lambda item: float(item["X"]))
+    return reactions
+
+
+def _read_geo_model(geo_path: Path) -> tuple[float | None, dict[str, float]]:
+    if not os.path.exists(geo_path):
+        return None, {}
+
+    point_pattern = re.compile(r"Point\((\d+)\)\s*=\s*\{([^}]+)\};", flags=re.IGNORECASE)
+    physical_point_pattern = re.compile(
+        r"Physical\s+Point\(\"([^\"]+)\"\)\s*=\s*\{([^}]+)\};",
+        flags=re.IGNORECASE,
+    )
+
+    point_x: dict[int, float] = {}
+    group_x: dict[str, float] = {}
+
+    with open(geo_path, "r", encoding="utf-8", errors="ignore") as f:
+        lines = f.readlines()
+
+    for line in lines:
+        match = point_pattern.search(line)
+        if not match:
+            continue
+        pid = int(match.group(1))
+        xyz = [v.strip() for v in match.group(2).split(",")]
+        if len(xyz) < 1:
+            continue
+        try:
+            point_x[pid] = float(xyz[0])
+        except ValueError:
+            continue
+
+    if point_x:
+        xs = list(point_x.values())
+        beam_length = max(xs) - min(xs)
+    else:
+        beam_length = None
+
+    for line in lines:
+        match = physical_point_pattern.search(line)
+        if not match:
+            continue
+        name = match.group(1).strip().upper()
+        ids = []
+        for token in match.group(2).split(","):
+            token = token.strip()
+            if token.isdigit():
+                ids.append(int(token))
+        mapped_x = [point_x[idx] for idx in ids if idx in point_x]
+        if mapped_x:
+            group_x[name] = float(np.mean(mapped_x))
+
+    return beam_length, group_x
+
+
+def _read_loads(comm_path: Path) -> list[dict[str, float | str]]:
+    if not os.path.exists(comm_path):
+        return []
+
+    with open(comm_path, "r", encoding="utf-8", errors="ignore") as f:
+        text = f.read().upper()
+
+    loads: list[dict[str, float | str]] = []
+
+    def extract_blocks(keyword: str) -> list[str]:
+        blocks: list[str] = []
+        pattern = re.compile(rf"{keyword}\s*=\s*_F\s*\(", flags=re.IGNORECASE)
+        for match in pattern.finditer(text):
+            open_idx = match.end() - 1  # index of '('
+            depth = 1
+            i = open_idx + 1
+            while i < len(text) and depth > 0:
+                if text[i] == "(":
+                    depth += 1
+                elif text[i] == ")":
+                    depth -= 1
+                i += 1
+            if depth == 0:
+                blocks.append(text[open_idx + 1 : i - 1])
+        return blocks
+
+    for block in extract_blocks("FORCE_NODALE"):
+        fy_match = re.search(r"FY\s*=\s*([-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?)", block)
+        if fy_match is None:
+            continue
+        group_match = re.search(r"GROUP_NO\s*=\s*\(([^)]*)\)", block)
+        group_name = ""
+        if group_match:
+            candidates = re.findall(r"'([^']+)'", group_match.group(1))
+            if candidates:
+                group_name = candidates[0].strip().upper()
+        loads.append({"type": "point", "Fy": float(fy_match.group(1)), "group": group_name})
+
+    for block in extract_blocks("FORCE_POUTRE"):
+        fy_match = re.search(r"FY\s*=\s*([-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?)", block)
+        if fy_match is None:
+            continue
+        loads.append({"type": "uniform", "qy": float(fy_match.group(1))})
+
+    return loads
+
+
+def _read_support_groups(comm_path: Path) -> list[dict[str, str]]:
+    if not os.path.exists(comm_path):
+        return []
+
+    with open(comm_path, "r", encoding="utf-8", errors="ignore") as f:
+        text = f.read().upper()
+
+    supports: list[dict[str, str]] = []
+
+    def extract_balanced(inner_text: str, open_idx: int) -> tuple[str, int] | None:
+        depth = 1
+        i = open_idx + 1
+        while i < len(inner_text) and depth > 0:
+            if inner_text[i] == "(":
+                depth += 1
+            elif inner_text[i] == ")":
+                depth -= 1
+            i += 1
+        if depth != 0:
+            return None
+        return inner_text[open_idx + 1 : i - 1], i
+
+    def extract_f_blocks(inner_text: str) -> list[str]:
+        out: list[str] = []
+        pattern_f = re.compile(r"_F\s*\(", flags=re.IGNORECASE)
+        for m in pattern_f.finditer(inner_text):
+            open_idx = m.end() - 1
+            block = extract_balanced(inner_text, open_idx)
+            if block:
+                out.append(block[0])
+        return out
+
+    blocks: list[str] = []
+    pattern = re.compile(r"DDL_IMPO\s*=", flags=re.IGNORECASE)
+    for match in pattern.finditer(text):
+        i = match.end()
+        while i < len(text) and text[i].isspace():
+            i += 1
+        if i >= len(text):
+            continue
+        if text[i : i + 3] == "_F(":
+            block = extract_balanced(text, i + 2)
+            if block:
+                blocks.append(block[0])
+        elif text[i] == "(":
+            outer = extract_balanced(text, i)
+            if outer:
+                blocks.extend(extract_f_blocks(outer[0]))
+
+    for block in blocks:
+        group_match = re.search(r"GROUP_NO\s*=\s*\(([^)]*)\)", block)
+        if not group_match:
+            continue
+        names = re.findall(r"'([^']+)'", group_match.group(1))
+        if not names:
+            continue
+        block_clean = block.replace(" ", "")
+        has_dx = "DX=" in block_clean
+        has_dy = "DY=" in block_clean
+        has_drz = "DRZ=" in block_clean
+        if has_dx and has_dy and has_drz:
+            s_type = "fixed"
+        elif has_dy and has_dx:
+            s_type = "pinned"
+        elif has_dy:
+            s_type = "roller"
+        else:
+            s_type = "pinned"
+        supports.append({"group": names[0].strip().upper(), "type": s_type})
+    return supports
+
+
+def _draw_support(ax, x0: float, y0: float, support_type: str, scale: float) -> None:
+    h = scale * 0.8
+    w = scale * 0.35
+
+    if support_type == "fixed":
+        ax.add_patch(plt.Rectangle((x0 - w, y0 - h), w, 2 * h, color="#2C3E50", alpha=0.85))
+        n_hatch = 7
+        for i in range(n_hatch):
+            yy = y0 - h + (2 * h * i / (n_hatch - 1))
+            ax.plot([x0 - w, x0 - w - 0.6 * w], [yy, yy - 0.25 * h], color="#2C3E50", lw=1.0)
+
+    elif support_type == "pinned":
+        tri_x = [x0, x0 - w, x0 + w]
+        tri_y = [y0 - 0.1 * h, y0 - h, y0 - h]
+        ax.fill(tri_x, tri_y, color="#2C3E50", alpha=0.88)
+
+    elif support_type == "roller":
+        tri_x = [x0, x0 - w, x0 + w]
+        tri_y = [y0 - 0.1 * h, y0 - h, y0 - h]
+        ax.fill(tri_x, tri_y, color="#2C3E50", alpha=0.88)
+        circle_y = y0 - h - 0.22 * h
+        for cx in (x0 - 0.5 * w, x0 + 0.5 * w):
+            ax.add_patch(plt.Circle((cx, circle_y), 0.18 * w, color="#2C3E50", alpha=0.88))
+
+
+def _draw_vertical_arrow(ax, x: float, y: float, magnitude: float, label: str, scale: float, color: str) -> None:
+    direction = 1 if magnitude >= 0 else -1
+    dy = 1.45 * scale * direction
+    head_w = 0.24 * scale
+    head_l = 0.30 * scale
+
+    ax.arrow(
+        x,
+        y,
+        0,
+        dy,
+        head_width=head_w,
+        head_length=head_l,
+        fc=color,
+        ec=color,
+        lw=2.1,
+        length_includes_head=True,
+        zorder=5,
+    )
+    ax.text(
+        x + 0.45 * scale,
+        y + 0.60 * dy,
+        label,
+        color=color,
+        fontsize=9,
+        va="bottom" if direction > 0 else "top",
+        ha="left",
+        fontweight="bold",
+    )
+
+
+def _draw_loads(
+    ax,
+    beam_length: float,
+    loads: list[dict[str, float | str]],
+    scale: float,
+    group_pos_visual: dict[str, float],
+) -> None:
+    for load in loads:
+        load_type = str(load.get("type", ""))
+
+        if load_type == "point":
+            fy = float(load.get("Fy", 0.0))
+            group_name = str(load.get("group", "")).upper()
+            if group_name and group_name in group_pos_visual:
+                x_loc = group_pos_visual[group_name]
+            elif group_name == "MID":
+                x_loc = 0.5 * beam_length
+            else:
+                x_loc = beam_length
+
+            display_force = convert_force(
+                fy,
+                DEFAULT_UNIT_POLICY.solver_force_unit,
+                DEFAULT_UNIT_POLICY.visualization_force_unit,
+            )
+
+            _draw_vertical_arrow(
+                ax,
+                x=x_loc,
+                y=0.60 * scale,
+                magnitude=-abs(fy),
+                label=f"P = {display_force:.2f} {DEFAULT_UNIT_POLICY.visualization_force_unit}",
+                scale=0.82 * scale,
+                color="#C0392B",
+            )
+
+        elif load_type == "uniform":
+            qy = float(load.get("qy", 0.0))
+            display_force = convert_force(
+                qy,
+                DEFAULT_UNIT_POLICY.solver_force_unit,
+                DEFAULT_UNIT_POLICY.visualization_force_unit,
+            )
+
+            n_arrows = 9
+            x_positions = np.linspace(0.08 * beam_length, 0.92 * beam_length, n_arrows)
+            top_y = 1.35 * scale
+            bot_y = 0.05 * scale
+            ax.plot([x_positions[0], x_positions[-1]], [top_y, top_y], color="#C0392B", lw=1.8, alpha=0.9)
+            for x_i in x_positions:
+                ax.arrow(
+                    x_i,
+                    top_y,
+                    0,
+                    bot_y - top_y,
+                    head_width=0.20 * scale,
+                    head_length=0.24 * scale,
+                    fc="#C0392B",
+                    ec="#C0392B",
+                    lw=2.0,
+                    length_includes_head=True,
+                    zorder=4,
+                )
+            ax.text(
+                0.5 * beam_length,
+                top_y + 0.16 * scale,
+                f"q = {display_force:.2f} {DEFAULT_UNIT_POLICY.visualization_force_unit}/{DEFAULT_UNIT_POLICY.visualization_length_unit}",
+                color="#C0392B",
+                fontsize=10,
+                ha="center",
+                va="bottom",
+                fontweight="bold",
+            )
+
+
 @tool("visualize_resu", return_direct=False)
-def visualize_resu_tool(resu_name: str = "beam_analysis.resu", run_id: str = "") -> str:
+def visualize_resu_tool(resu_name: str = "beam_job.resu", run_id: str = "") -> str:
     """
-    Parse a Code_Aster .resu file and visualize:
-      1) Beam deflection shape (DY)
-      2) Beam rotation curve (DRZ)
+    Parse Code_Aster .resu and generate:
+    1) deflection plot (DY)
+    2) rotation plot (DRZ)
     """
     resu_path = resolve_workspace_file(resu_name, "outputs", run_id or None)
     if not os.path.exists(resu_path):
-        return f"❌ Error: result file '{resu_path}' not found."
+        return f"Error: result file '{resu_path}' not found."
 
-    with open(resu_path, "r", encoding="utf-8", errors="ignore") as f:
-        lines = f.readlines()
+    data: list[tuple[int, float, float, float]] = []
 
-    # Extract nodal displacement data (N#, DX DY DZ DRX DRY DRZ)
-    node_pattern = re.compile(r"^\s*N\d+\s+")
-    data = []
-    for line in lines:
-        if node_pattern.match(line):
-            parts = line.strip().split()
-            if len(parts) >= 7:
-                try:
-                    node_id = int(parts[0][1:])
-                    dx, dy, dz, drx, dry, drz = map(float, parts[1:7])
-                    data.append((node_id, dy, drz))
-                except Exception:
+    disp_path = resolve_workspace_file("tab_disp.txt", "outputs", run_id or None)
+    disp_rows = _parse_disp_table_rows(disp_path)
+    if disp_rows:
+        data = disp_rows
+    else:
+        node_pattern = re.compile(r"^\s*(N\d+)\s+")
+        with open(resu_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if node_pattern.match(line) is None:
                     continue
+                parts = line.strip().split()
+                if len(parts) < 7:
+                    continue
+                try:
+                    node_id = _safe_node_id(parts[0])
+                    dy = float(parts[2])
+                    drz = float(parts[6])
+                except ValueError:
+                    continue
+                data.append((node_id, float("nan"), dy, drz))
 
-    if len(data) == 0:
-        return f"⚠️ No nodal displacement data found in '{resu_name}'."
+    if not data:
+        return f"Warning: no nodal displacement data found in '{resu_name}'."
 
-    # Sort by node ID
-    data.sort(key=lambda x: x[0])
-    node_ids = np.array([d[0] for d in data])
-    dy_values = np.array([d[1] for d in data])
-    drz_values = np.array([d[2] for d in data])
+    if any(not np.isnan(d[1]) for d in data):
+        data.sort(key=lambda row: (row[1] if not np.isnan(row[1]) else float("inf"), row[0]))
+    else:
+        data.sort(key=lambda row: row[0])
 
-    # Fix order: move node 2 to the end (beam tip)
-    if 2 in node_ids:
-        idx2 = np.where(node_ids == 2)[0][0]
-        node_ids = np.concatenate((np.delete(node_ids, idx2), [2]))
-        dy_values = np.concatenate((np.delete(dy_values, idx2), [dy_values[idx2]]))
-        drz_values = np.concatenate((np.delete(drz_values, idx2), [drz_values[idx2]]))
+    node_ids = np.array([d[0] for d in data], dtype=int)
+    dy_values = np.array([d[2] for d in data], dtype=float)
+    drz_values = np.array([d[3] for d in data], dtype=float)
 
-    x_positions = np.linspace(0, 1, len(node_ids))
+    if any(not np.isnan(d[1]) for d in data):
+        x_raw = np.array([d[1] for d in data], dtype=float)
+    else:
+        x_raw = _build_axis_from_nodes(node_ids.tolist(), run_id)
 
-    # === Plot 1: Deflection ===
-    plt.style.use("seaborn-v0_8-whitegrid")
-    plt.figure(figsize=(9, 3.5))
+    x_positions = np.array(
+        [
+            convert_length(
+                value,
+                DEFAULT_UNIT_POLICY.solver_coordinate_unit,
+                DEFAULT_UNIT_POLICY.visualization_length_unit,
+            )
+            for value in x_raw
+        ],
+        dtype=float,
+    )
+
     dy_display = np.array(
         [
             convert_length(
                 value,
                 DEFAULT_UNIT_POLICY.solver_displacement_unit,
-                DEFAULT_UNIT_POLICY.visualization_displacement_unit,
+                FORCED_DISP_UNIT,
             )
             for value in dy_values
-        ]
+        ],
+        dtype=float,
     )
-    plt.plot(x_positions, dy_display, "o-", lw=2.2)
-    plt.title("Beam Deflected Shape (DY)", fontsize=13, weight="bold")
-    plt.xlabel("Normalized Beam Length")
-    plt.ylabel(
-        f"Vertical Deflection [{DEFAULT_UNIT_POLICY.visualization_displacement_unit}]"
-    )
-    plt.grid(True, linestyle="--", alpha=0.7)
-    max_disp = np.min(dy_display)
-    tip_idx = np.argmin(dy_display)
-    plt.scatter(x_positions[tip_idx], dy_display[tip_idx], color="red", zorder=5)
-    plt.text(
-        x_positions[tip_idx],
-        dy_display[tip_idx] - 5,
-        f"{max_disp:.1f} {DEFAULT_UNIT_POLICY.visualization_displacement_unit}",
-        color="red",
-        va="top",
-        fontsize=9,
-    )
-    def_path = resolve_workspace_file(
-        os.path.splitext(resu_name)[0] + "_def.png", "viz", run_id or None
-    )
-    plt.savefig(def_path, dpi=200)
-    plt.close()
 
-    # === Plot 2: Rotation ===
-    plt.figure(figsize=(9, 3.5))
-    plt.plot(x_positions, drz_values, "o-", lw=2.2, color="tab:red")
-    plt.title("Beam Rotation Curve (DRZ)", fontsize=13, weight="bold")
-    plt.xlabel("Normalized Beam Length")
-    plt.ylabel("Rotation [rad]")
-    plt.grid(True, linestyle="--", alpha=0.7)
-    max_rot = np.min(drz_values)
-    tip_idx = np.argmin(drz_values)
-    plt.scatter(x_positions[tip_idx], drz_values[tip_idx], color="red", zorder=5)
-    plt.text(
-        x_positions[tip_idx],
-        drz_values[tip_idx] - 0.01,
-        f"{max_rot:.3f} rad",
-        color="red",
-        va="top",
-        fontsize=9,
+    fig, ax = plt.subplots(figsize=(10.0, 4.4))
+    ax.plot(x_positions, dy_display, color="#1f77b4", lw=2.4, marker="o", ms=4)
+    _apply_plot_style(
+        ax,
+        title="Deflection Diagram (DY)",
+        xlabel=f"Beam Axis X [{DEFAULT_UNIT_POLICY.visualization_length_unit}]",
+        ylabel=f"Deflection [{FORCED_DISP_UNIT}]",
+        show_zero=True,
     )
-    rot_path = resolve_workspace_file(
-        os.path.splitext(resu_name)[0] + "_rot.png", "viz", run_id or None
+    ax.margins(y=0.22)
+    _ensure_zero_in_ylim(ax)
+    max_disp = _annotate_extreme(
+        ax,
+        x_positions,
+        dy_display,
+        FORCED_DISP_UNIT,
+        color="#1f77b4",
     )
-    plt.savefig(rot_path, dpi=200)
-    plt.close()
+
+    def_path = resolve_workspace_file(f"{Path(resu_name).stem}_def.png", "viz", run_id or None)
+    fig.tight_layout()
+    fig.savefig(def_path, dpi=FIG_DPI)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(10.0, 4.4))
+    ax.plot(x_positions, drz_values, color="#d62728", lw=2.4, marker="o", ms=4)
+    _apply_plot_style(
+        ax,
+        title="Rotation Diagram (DRZ)",
+        xlabel=f"Beam Axis X [{DEFAULT_UNIT_POLICY.visualization_length_unit}]",
+        ylabel=f"Rotation [{DEFAULT_UNIT_POLICY.visualization_rotation_unit}]",
+        show_zero=True,
+    )
+    ax.margins(y=0.22)
+    _ensure_zero_in_ylim(ax)
+    max_rot = _annotate_extreme(
+        ax,
+        x_positions,
+        drz_values,
+        DEFAULT_UNIT_POLICY.visualization_rotation_unit,
+        color="#d62728",
+    )
+
+    rot_path = resolve_workspace_file(f"{Path(resu_name).stem}_rot.png", "viz", run_id or None)
+    fig.tight_layout()
+    fig.savefig(rot_path, dpi=FIG_DPI)
+    plt.close(fig)
 
     return (
-        f"✅ Visualizations saved:\n"
-        f"📉 Deflection: {def_path}\n"
-        f"📈 Rotation: {rot_path}\n"
-        f"📊 Nodes: {len(node_ids)} | Max DY = {max_disp:.3f} {DEFAULT_UNIT_POLICY.visualization_displacement_unit} | Max DRZ = {max_rot:.4f} {DEFAULT_UNIT_POLICY.visualization_rotation_unit}"
+        "Visualizations saved:\n"
+        f"- Deflection: {def_path}\n"
+        f"- Rotation: {rot_path}\n"
+        f"- Nodes: {len(node_ids)} | "
+        f"max |DY| = {abs(max_disp):.3f} {FORCED_DISP_UNIT} | "
+        f"max |DRZ| = {abs(max_rot):.4f} {DEFAULT_UNIT_POLICY.visualization_rotation_unit}"
     )
 
 
-# ============================================================
-# 🟥 TOOL 2 — STRESS CONTOUR MAP
-# ============================================================
 @tool("visualize_stress", return_direct=False)
 def visualize_stress_tool(stress_name: str = "tab_sie.txt", run_id: str = "") -> str:
     """
-    Parse Code_Aster table from IMPR_TABLE (POST_RELEVE_T) output
-    and visualize internal shear force (VY) and bending moment (MFZ).
+    Parse Code_Aster SIEF_ELNO table and plot:
+    1) Shear force diagram (VY)
+    2) Bending moment diagram (MFZ)
     """
     stress_path = resolve_workspace_file(stress_name, "outputs", run_id or None)
     if not os.path.exists(stress_path):
-        return f"❌ Error: file '{stress_path}' not found."
+        return f"Error: file '{stress_path}' not found."
 
-    data = []
-    with open(stress_path, "r", encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            if not line.strip() or line.startswith("#") or "NOM_CHAM" in line:
-                continue
-            parts = [p.strip() for p in line.split(";")]
-            if len(parts) >= 16 and parts[1].startswith("N"):
-                try:
-                    node_id = int(parts[1][1:])
-                    vy = float(parts[11])
-                    mfz = float(parts[15])
-                    data.append((node_id, vy, mfz))
-                except Exception:
-                    continue
+    rows = _parse_sie_rows(stress_path)
+    if not rows:
+        return f"Warning: no internal force data found in '{stress_name}'."
 
-    if len(data) == 0:
-        return f"⚠️ No internal force data found in '{stress_name}'."
+    x_raw = np.array([row["x"] for row in rows], dtype=float)
+    if np.isnan(x_raw).all():
+        node_ids = [int(row["node"]) for row in rows]
+        x_raw = _build_axis_from_nodes(node_ids, run_id)
+        x_label = f"Beam Axis X [{DEFAULT_UNIT_POLICY.visualization_length_unit}]"
+    else:
+        x_raw = np.nan_to_num(x_raw, nan=float(np.nanmean(x_raw)))
+        x_label = f"Beam Axis X [{DEFAULT_UNIT_POLICY.visualization_length_unit}]"
 
-    # Sort nodes numerically
-    data.sort(key=lambda x: x[0])
-    node_ids = np.array([d[0] for d in data])
-    vy = np.array([d[1] for d in data])
-    mfz = np.array([d[2] for d in data])
+    x_display = np.array(
+        [
+            convert_length(
+                value,
+                DEFAULT_UNIT_POLICY.solver_coordinate_unit,
+                DEFAULT_UNIT_POLICY.visualization_length_unit,
+            )
+            for value in x_raw
+        ],
+        dtype=float,
+    )
 
-    # Move node 2 (tip) to the end
-    if 2 in node_ids:
-        idx2 = np.where(node_ids == 2)[0][0]
-        node_ids = np.concatenate((np.delete(node_ids, idx2), [2]))
-        vy = np.concatenate((np.delete(vy, idx2), [vy[idx2]]))
-        mfz = np.concatenate((np.delete(mfz, idx2), [mfz[idx2]]))
-
-    x = np.linspace(0, 1, len(node_ids))
+    vy = np.array([row["vy"] for row in rows], dtype=float)
+    mfz = np.array([row["mfz"] for row in rows], dtype=float)
 
     vy_display = np.array(
         [
@@ -187,7 +747,8 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt", run_id: str = "") ->
                 DEFAULT_UNIT_POLICY.visualization_force_unit,
             )
             for value in vy
-        ]
+        ],
+        dtype=float,
     )
     mfz_display = np.array(
         [
@@ -197,82 +758,71 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt", run_id: str = "") ->
                 DEFAULT_UNIT_POLICY.visualization_moment_unit,
             )
             for value in mfz
-        ]
+        ],
+        dtype=float,
     )
 
-    # === Shear Force Diagram ===
-    plt.style.use("seaborn-v0_8-whitegrid")
-    plt.figure(figsize=(8, 2.2))
-    plt.plot(x, vy_display, "o-", lw=2.2, color="tab:orange")
-    plt.fill_between(x, vy_display, 0, color="tab:orange", alpha=0.3)
-    plt.title("Shear Force Diagram (VY)", fontsize=13, weight="bold")
-    plt.xlabel("Normalized Beam Length")
-    plt.ylabel(f"VY [{DEFAULT_UNIT_POLICY.visualization_force_unit}]")
-    plt.grid(True, linestyle="--", alpha=0.7)
-    v_path = resolve_workspace_file("shear_diagram.png", "viz", run_id or None)
-    plt.tight_layout()
-    plt.savefig(v_path, dpi=200)
-    plt.close()
+    fig, ax = plt.subplots(figsize=(10.0, 3.8))
+    ax.plot(x_display, vy_display, color="#E67E22", lw=2.3)
+    ax.fill_between(x_display, vy_display, 0.0, color="#F5CBA7", alpha=0.75)
+    _apply_plot_style(
+        ax,
+        title="Shear Force Diagram (VY)",
+        xlabel=x_label,
+        ylabel=f"VY [{DEFAULT_UNIT_POLICY.visualization_force_unit}]",
+        show_zero=True,
+    )
+    _ensure_zero_in_ylim(ax)
 
-    # === Bending Moment Diagram ===
-    plt.figure(figsize=(8, 2.2))
-    plt.plot(x, mfz_display, "o-", lw=2.2, color="tab:blue")
-    plt.fill_between(x, mfz_display, 0, color="tab:blue", alpha=0.3)
-    plt.title("Bending Moment Diagram (MFZ)", fontsize=13, weight="bold")
-    plt.xlabel("Normalized Beam Length")
-    plt.ylabel(f"MZ [{DEFAULT_UNIT_POLICY.visualization_moment_unit}]")
-    plt.grid(True, linestyle="--", alpha=0.7)
+    v_path = resolve_workspace_file("shear_diagram.png", "viz", run_id or None)
+    fig.tight_layout()
+    fig.savefig(v_path, dpi=FIG_DPI)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(10.0, 3.8))
+    ax.plot(x_display, mfz_display, color="#2471A3", lw=2.3)
+    ax.fill_between(x_display, mfz_display, 0.0, color="#AED6F1", alpha=0.78)
+    _apply_plot_style(
+        ax,
+        title="Bending Moment Diagram (MFZ)",
+        xlabel=x_label,
+        ylabel=f"MFZ [{DEFAULT_UNIT_POLICY.visualization_moment_unit}]",
+        show_zero=True,
+    )
+    _ensure_zero_in_ylim(ax)
+
     m_path = resolve_workspace_file("moment_diagram.png", "viz", run_id or None)
-    plt.tight_layout()
-    plt.savefig(m_path, dpi=200)
-    plt.close()
+    fig.tight_layout()
+    fig.savefig(m_path, dpi=FIG_DPI)
+    plt.close(fig)
 
     return (
-        f"✅ Internal force plots generated:\n"
-        f"🟠 Shear: {v_path}\n"
-        f"🔵 Moment: {m_path}\n"
-        f"📊 Nodes: {len(node_ids)} | "
-        f"VY range: {np.min(vy_display):.1f} → {np.max(vy_display):.1f} {DEFAULT_UNIT_POLICY.visualization_force_unit} | "
-        f"MFZ range: {np.min(mfz_display):.1f} → {np.max(mfz_display):.1f} {DEFAULT_UNIT_POLICY.visualization_moment_unit}"
+        "Internal force plots generated:\n"
+        f"- Shear: {v_path}\n"
+        f"- Moment: {m_path}\n"
+        f"- Nodes: {len(rows)} | "
+        f"VY range: {float(np.min(vy_display)):.3f} to {float(np.max(vy_display)):.3f} {DEFAULT_UNIT_POLICY.visualization_force_unit} | "
+        f"MFZ range: {float(np.min(mfz_display)):.3f} to {float(np.max(mfz_display)):.3f} {DEFAULT_UNIT_POLICY.visualization_moment_unit}"
     )
 
 
-# ============================================================
-# 🟩 TOOL 3 — BENDING MOMENT MFZ COLOR CONTOUR
-# ============================================================
 @tool("visualize_mfz_contour", return_direct=False)
 def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt", run_id: str = "") -> str:
-    """
-    Visualize bending moment MFZ along beam length as a color contour.
-    Reads POST_RELEVE_T (SIEF_ELNO) output table.
-    """
+    """Visualize bending moment MFZ on a schematic beam with color contour."""
     stress_path = resolve_workspace_file(stress_name, "outputs", run_id or None)
     if not os.path.exists(stress_path):
-        return f"❌ Error: file '{stress_path}' not found."
+        return f"Error: file '{stress_path}' not found."
 
-    data = []
-    with open(stress_path, "r", encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            if not line.strip() or line.startswith("#") or "NOM_CHAM" in line:
-                continue
-            parts = [p.strip() for p in line.split(";")]
-            if len(parts) >= 16 and parts[1].startswith("N"):
-                try:
-                    node_id = int(parts[1][1:])
-                    x = float(parts[7])
-                    mfz = float(parts[15])
-                    data.append((node_id, x, mfz))
-                except Exception:
-                    continue
+    rows = _parse_sie_rows(stress_path)
+    if not rows:
+        return f"Warning: no MFZ data found in '{stress_name}'."
 
-    if len(data) == 0:
-        return f"⚠️ No MFZ data found in '{stress_name}'."
-
-    # Sort nodes numerically
-    data.sort(key=lambda x: x[0])
-    node_ids = np.array([d[0] for d in data])
-    x = np.array([d[1] for d in data])
-    mfz = np.array([d[2] for d in data])
+    x_raw = np.array([row["x"] for row in rows], dtype=float)
+    if np.isnan(x_raw).all():
+        node_ids = [int(row["node"]) for row in rows]
+        x_raw = _build_axis_from_nodes(node_ids, run_id)
+    else:
+        x_raw = np.nan_to_num(x_raw, nan=float(np.nanmean(x_raw)))
 
     x_display = np.array(
         [
@@ -281,317 +831,131 @@ def visualize_mfz_contour_tool(stress_name: str = "tab_sie.txt", run_id: str = "
                 DEFAULT_UNIT_POLICY.solver_coordinate_unit,
                 DEFAULT_UNIT_POLICY.visualization_length_unit,
             )
-            for value in x
-        ]
+            for value in x_raw
+        ],
+        dtype=float,
     )
-    beam_length = np.max(x_display) - np.min(x_display)
-    if beam_length < 1e-6:
-        beam_length = 4.0
-
-    # Move node 2 to end
-    if 2 in node_ids:
-        idx2 = np.where(node_ids == 2)[0][0]
-        node_ids = np.concatenate((np.delete(node_ids, idx2), [2]))
-        x = np.concatenate((np.delete(x, idx2), [x[idx2]]))
-        x_display = np.concatenate((np.delete(x_display, idx2), [x_display[idx2]]))
-        mfz = np.concatenate((np.delete(mfz, idx2), [mfz[idx2]]))
 
     mfz_display = np.array(
         [
             convert_moment(
-                value,
+                row["mfz"],
                 DEFAULT_UNIT_POLICY.solver_moment_unit,
                 DEFAULT_UNIT_POLICY.visualization_moment_unit,
             )
-            for value in mfz
-        ]
+            for row in rows
+        ],
+        dtype=float,
     )
 
-    cmap = plt.get_cmap("turbo")
-    norm = plt.Normalize(vmin=np.min(mfz_display), vmax=np.max(mfz_display))
-    colors = cmap(norm(mfz_display))
+    beam_length = float(np.max(x_display) - np.min(x_display))
+    if beam_length < 1e-9:
+        beam_length = 1.0
 
-    # Plot color contour
-    plt.style.use("seaborn-v0_8-whitegrid")
-    fig, ax = plt.subplots(figsize=(8, 1.0))
+    node_ids = [int(row["node"]) for row in rows]
+    disp_state = _parse_disp_state(resolve_workspace_file("tab_disp.txt", "outputs", run_id or None))
+    if disp_state and all(node_id in disp_state for node_id in node_ids):
+        dy_solver = np.array([disp_state[node_id][1] for node_id in node_ids], dtype=float)
+    else:
+        dy_solver = np.zeros(len(node_ids), dtype=float)
+    dy_mm = np.array(
+        [
+            convert_length(value, DEFAULT_UNIT_POLICY.solver_displacement_unit, FORCED_DISP_UNIT)
+            for value in dy_solver
+        ],
+        dtype=float,
+    )
+
+    fig, ax = plt.subplots(figsize=(11.5, 3.6))
+    cmap = plt.get_cmap("RdYlBu_r")
+    v_abs = max(abs(float(np.min(mfz_display))), abs(float(np.max(mfz_display))), 1e-9)
+    norm = plt.Normalize(vmin=-v_abs, vmax=v_abs)
+
+    x_min = float(np.min(x_display))
+    x_max = float(np.max(x_display))
+    beam_h = max(0.08 * beam_length, 0.12)
+    y_base = 0.0
+    center_ref = y_base + 0.5 * beam_h
+    max_abs_dy = float(np.max(np.abs(dy_mm))) if dy_mm.size > 0 else 0.0
+    if max_abs_dy > 1e-12:
+        defl_scale = 0.65 * beam_h / max_abs_dy
+        dy_plot = dy_mm * defl_scale
+    else:
+        dy_plot = np.zeros_like(dy_mm)
+    y_center = center_ref + dy_plot
+
     for i in range(len(x_display) - 1):
-        ax.fill_between(
-            [x_display[i], x_display[i + 1]], 0, 0.5, color=colors[i], linewidth=0
+        x0 = float(x_display[i])
+        x1 = float(x_display[i + 1])
+        y0 = float(y_center[i])
+        y1 = float(y_center[i + 1])
+        val = 0.5 * (mfz_display[i] + mfz_display[i + 1])
+        poly_x = [x0, x1, x1, x0]
+        poly_y = [y0 - 0.5 * beam_h, y1 - 0.5 * beam_h, y1 + 0.5 * beam_h, y0 + 0.5 * beam_h]
+        ax.fill(poly_x, poly_y, color=cmap(norm(val)), zorder=2, linewidth=0)
+
+    top = y_center + 0.5 * beam_h
+    bot = y_center - 0.5 * beam_h
+    ax.plot(x_display, top, color="#2E4053", lw=1.2, zorder=3)
+    ax.plot(x_display, bot, color="#2E4053", lw=1.2, zorder=3)
+    ax.plot(x_display, y_center, color="#0B5345", lw=1.4, ls="--", zorder=4, label=f"Deflection shape (scaled, DY in {FORCED_DISP_UNIT})")
+
+    _, group_pos_solver = _read_geo_model(resolve_workspace_file("model.geo", "inputs", run_id or None))
+    group_pos_visual = {
+        name: convert_length(
+            x_val,
+            DEFAULT_UNIT_POLICY.solver_coordinate_unit,
+            DEFAULT_UNIT_POLICY.visualization_length_unit,
         )
+        for name, x_val in group_pos_solver.items()
+    }
+    support_defs = _read_support_groups(resolve_workspace_file("model.comm", "inputs", run_id or None))
+    support_scale = max(1.05 * beam_h, 0.18)
+    for support in support_defs:
+        group_name = support["group"]
+        if group_name in group_pos_visual:
+            sx = group_pos_visual[group_name]
+        elif group_name == "BASE":
+            sx = x_min
+        elif group_name == "TIP":
+            sx = x_max
+        else:
+            continue
+        _draw_support(ax, sx, float(np.interp(sx, x_display, y_center)), support["type"], support_scale)
 
-    ax.set_xlim(np.min(x_display), np.max(x_display))
-    ax.set_ylim(0, 0.5)
-    ax.axis("off")
-    ax.set_title("Bending Moment Contour (MFZ)", fontsize=13, weight="bold")
+    if not support_defs:
+        _draw_support(ax, x_min, float(y_center[0]), "fixed", support_scale)
 
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    # Close the beam tip with an explicit vertical edge.
+    ax.plot([x_max, x_max], [float(bot[-1]), float(top[-1])], color="#2E4053", lw=1.5, zorder=4)
+
+    ax.set_xlim(x_min - 0.03 * beam_length, x_max + 0.03 * beam_length)
+    y_min = float(np.min(bot)) - 0.9 * beam_h
+    y_max = float(np.max(top)) + 1.0 * beam_h
+    ax.set_ylim(y_min, y_max)
+    ax.set_yticks([])
+    ax.set_xlabel(f"Beam Axis X [{DEFAULT_UNIT_POLICY.visualization_length_unit}]", fontsize=10)
+    ax.set_title("MFZ Contour on Beam", fontsize=12, fontweight="bold", pad=9)
+    for spine in ("top", "right", "left"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["bottom"].set_linewidth(1.1)
+
+    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])
-    cbar = plt.colorbar(sm, ax=ax, orientation="horizontal", pad=0.25)
+    cbar = plt.colorbar(sm, ax=ax, orientation="horizontal", pad=0.24, shrink=0.48, aspect=30)
     cbar.set_label(f"MFZ [{DEFAULT_UNIT_POLICY.visualization_moment_unit}]", fontsize=10)
+    ax.legend(loc="upper right", fontsize=8, frameon=True)
 
     out_path = resolve_workspace_file("mfz_contour.png", "viz", run_id or None)
-    plt.savefig(out_path, dpi=220, bbox_inches="tight")
-    plt.close()
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=FIG_DPI)
+    plt.close(fig)
 
     return (
-        f"✅ MFZ contour saved: {out_path}\n"
-        f"📊 MFZ range: {np.min(mfz_display):.2f} → {np.max(mfz_display):.2f} {DEFAULT_UNIT_POLICY.visualization_moment_unit}\n"
-        f"📏 Beam length: {beam_length:.2f} {DEFAULT_UNIT_POLICY.visualization_length_unit} | Nodes: {len(node_ids)}"
+        f"MFZ contour saved: {out_path}\n"
+        f"MFZ range: {float(np.min(mfz_display)):.3f} to {float(np.max(mfz_display)):.3f} {DEFAULT_UNIT_POLICY.visualization_moment_unit}\n"
+        f"Beam length: {beam_length:.3f} {DEFAULT_UNIT_POLICY.visualization_length_unit} | Nodes: {len(rows)}"
     )
-
-
-# ============================================================
-# 🟧 TOOL 4 — FREE-BODY DIAGRAM
-# ============================================================
-
-
-# ------------------------------------------------------------
-#  1. Parse reaction file (tab_reac.txt)
-# ------------------------------------------------------------
-def _read_reactions(reac_path):
-    """Parse tab_reac.txt from IMPR_TABLE output (Code_Aster)."""
-    if not os.path.exists(reac_path):
-        return None
-
-    with open(reac_path, "r", encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            if re.search(r"\bN\d+\b", line):
-                parts = line.strip().split()
-                try:
-                    node_index = next(
-                        i for i, p in enumerate(parts) if re.match(r"N\d+", p)
-                    )
-                    node = parts[node_index]
-                    fy = float(parts[node_index + 4])  # DY component
-                    mz = float(parts[-1])  # Moment (DYZ column)
-                    fx = (
-                        float(parts[node_index + 3])
-                        if len(parts) > node_index + 3
-                        else 0.0
-                    )
-                    return {
-                        "node": node,
-                        "Fx": fx,
-                        "Fy": fy,
-                        "Fz": 0.0,
-                        "Mx": 0.0,
-                        "My": 0.0,
-                        "Mz": mz,
-                    }
-                except Exception:
-                    continue
-    return None
-
-
-# ------------------------------------------------------------
-#  2. Parse beam length from .geo file
-# ------------------------------------------------------------
-def _read_beam_length(geo_path):
-    """Read beam length from the minimum and maximum x-coordinates in the .geo file."""
-    if not os.path.exists(geo_path):
-        return None
-
-    coords = {}
-    point_pattern = re.compile(r"Point\((\d+)\)\s*=\s*\{([^}]+)\};")
-    with open(geo_path, "r", encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            m = point_pattern.search(line)
-            if m:
-                pid = int(m.group(1))
-                xyz = [float(v.strip()) for v in m.group(2).split(",")]
-                coords[pid] = xyz
-
-    if coords:
-        xs = [xyz[0] for xyz in coords.values()]
-        return max(xs) - min(xs)
-    return None
-
-
-# ------------------------------------------------------------
-#  3. Parse loads from .comm file
-# ------------------------------------------------------------
-def _read_loads(comm_path: str):
-    """
-    Parse Code_Aster .comm file and extract applied loads.
-    Detects FORCE_NODALE or FORCE_POUTRE blocks and extracts FY values.
-    """
-    if not os.path.exists(comm_path):
-        return []
-
-    with open(comm_path, "r", encoding="utf-8", errors="ignore") as f:
-        lines = f.readlines()
-
-    loads = []
-    inside_force_nodale = False
-    inside_force_poutre = False
-    current_block = []
-
-    for line in lines:
-        u = line.upper()
-
-        # Detect start of load blocks
-        if "FORCE_NODALE" in u:
-            inside_force_nodale = True
-            inside_force_poutre = False
-            current_block = [u]
-            continue
-        if "FORCE_POUTRE" in u:
-            inside_force_poutre = True
-            inside_force_nodale = False
-            current_block = [u]
-            continue
-
-        # Collect block lines until closing parenthesis and semicolon
-        if inside_force_nodale or inside_force_poutre:
-            current_block.append(u)
-            if ")" in u and ";" in u:
-                block_text = " ".join(current_block)
-                fy_match = re.search(
-                    r"FY\s*=\s*([-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?)", block_text
-                )
-                if fy_match:
-                    val = float(fy_match.group(1))
-                    group_match = re.search(r"GROUP_NO\s*=\s*\('([^']+)'\s*,?\)", block_text)
-                    group_name = group_match.group(1) if group_match else ""
-                    if inside_force_nodale:
-                        loads.append({"type": "point", "Fy": val, "group": group_name})
-                    elif inside_force_poutre:
-                        loads.append({"type": "uniform", "qy": val})
-                inside_force_nodale = False
-                inside_force_poutre = False
-                current_block = []
-
-    return loads
-
-
-# ------------------------------------------------------------
-#  4. Drawing utilities
-# ------------------------------------------------------------
-def _draw_support(ax, x0, y0, support_type="fixed"):
-    """Draw a support symbol at (x0, y0)."""
-    if support_type == "fixed":
-        ax.add_patch(
-            plt.Rectangle((x0 - 0.02, y0 - 0.1), 0.02, 0.2, color="black", alpha=0.6)
-        )
-        for yy in [y0 - 0.08, y0 - 0.04, y0, y0 + 0.04, y0 + 0.08]:
-            ax.plot([x0 - 0.02, x0 - 0.04], [yy, yy - 0.02], color="black", lw=1)
-
-    elif support_type == "pinned":
-        tri_x = [x0, x0 - 0.05, x0 + 0.05]
-        tri_y = [y0 - 0.05, y0 - 0.15, y0 - 0.15]
-        ax.fill(tri_x, tri_y, color="black", alpha=0.6)
-
-    elif support_type == "roller":
-        tri_x = [x0, x0 - 0.05, x0 + 0.05]
-        tri_y = [y0 - 0.05, y0 - 0.15, y0 - 0.15]
-        ax.fill(tri_x, tri_y, color="black", alpha=0.6)
-        circ_y = y0 - 0.18
-        for cx in [x0 - 0.03, x0 + 0.03]:
-            roller = plt.Circle((cx, circ_y), 0.015, color="black", alpha=0.6)
-            ax.add_patch(roller)
-
-
-def _draw_vertical_arrow(ax, x, y, magnitude, label, color="tab:blue"):
-    """Draw vertical reaction arrow with label."""
-    direction = 1 if magnitude >= 0 else -1
-    dy = 0.25 * direction
-    ax.arrow(
-        x,
-        y,
-        0,
-        dy,
-        head_width=0.03,
-        head_length=0.05,
-        fc=color,
-        ec=color,
-        lw=2,
-        length_includes_head=True,
-    )
-    ax.text(
-        x + 0.05,
-        y + dy * 0.6,
-        label,
-        color=color,
-        fontsize=9,
-        va="bottom" if direction > 0 else "top",
-        ha="left",
-    )
-
-
-def _draw_load(ax, beam_length, loads):
-    """Draw applied loads (in red)."""
-    for load in loads:
-        if load["type"] == "point":
-            Fy = load["Fy"]
-            load_x = beam_length / 2 if load.get("group") == "MID" else beam_length
-            display_force = convert_force(
-                Fy,
-                DEFAULT_UNIT_POLICY.solver_force_unit,
-                DEFAULT_UNIT_POLICY.visualization_force_unit,
-            )
-            ax.arrow(
-                load_x,
-                0.0,
-                0,
-                -0.25,
-                head_width=0.03,
-                head_length=0.05,
-                fc="tab:red",
-                ec="tab:red",
-                lw=2,
-                length_includes_head=True,
-            )
-            ax.text(
-                load_x - 0.05,
-                -0.35,
-                f"{display_force:.1f} {DEFAULT_UNIT_POLICY.visualization_force_unit}",
-                color="tab:red",
-                fontsize=9,
-                ha="right",
-                va="top",
-                fontweight="bold",
-            )
-
-        elif load["type"] == "uniform":
-            qy = load["qy"]
-            display_force = convert_force(
-                qy,
-                DEFAULT_UNIT_POLICY.solver_force_unit,
-                DEFAULT_UNIT_POLICY.visualization_force_unit,
-            )
-            n_arrows = 6
-            for i in range(1, n_arrows):
-                x = beam_length * i / n_arrows
-                ax.arrow(
-                    x,
-                    0.05,
-                    0,
-                    -0.2,
-                    head_width=0.02,
-                    head_length=0.03,
-                    fc="tab:red",
-                    ec="tab:red",
-                    lw=1.8,
-                    length_includes_head=True,
-                )
-            ax.text(
-                beam_length / 2,
-                -0.35,
-                f"q = {display_force:.1f} {DEFAULT_UNIT_POLICY.visualization_force_unit}/{DEFAULT_UNIT_POLICY.visualization_length_unit}",
-                color="tab:red",
-                fontsize=9,
-                ha="center",
-                va="top",
-                fontweight="bold",
-            )
-
-
-# ------------------------------------------------------------
-#  5. Main visualization tool
-# ------------------------------------------------------------
-# ============================================================
-# 🟧 TOOL 4 — FREE-BODY DIAGRAM (FIXED FOR mm → m SCALING)
-# ============================================================
 
 
 @tool("visualize_freebody", return_direct=False)
@@ -603,150 +967,167 @@ def visualize_freebody_tool(
     unit: str = "m",
     run_id: str = "",
 ) -> str:
-    """Draw full free-body diagram including supports, loads, and reactions."""
-
-    # --- Read beam length in mm from .geo ---
+    """Draw free-body diagram with support symbols, external loads, and reactions."""
     geo_path = resolve_workspace_file(geo_name, "inputs", run_id or None)
-    beam_length_mm = _read_beam_length(geo_path)
-    if beam_length_mm is None:
-        beam_length_mm = 1000.0  # fallback = 1 meter
+    beam_length_raw, group_pos_solver = _read_geo_model(geo_path)
+    if beam_length_raw is None:
+        beam_length_raw = 1000.0
 
     beam_length = convert_length(
-        beam_length_mm,
+        beam_length_raw,
         DEFAULT_UNIT_POLICY.solver_coordinate_unit,
         DEFAULT_UNIT_POLICY.visualization_length_unit,
     )
 
-    # --- Read reactions ---
-    reac_path = resolve_workspace_file(reac_name, "outputs", run_id or None)
-    reac = _read_reactions(reac_path)
-    if reac is None:
-        return f"❌ Error: could not parse reactions from '{reac_path}'."
+    group_pos_visual = {
+        name: convert_length(
+            x_val,
+            DEFAULT_UNIT_POLICY.solver_coordinate_unit,
+            DEFAULT_UNIT_POLICY.visualization_length_unit,
+        )
+        for name, x_val in group_pos_solver.items()
+    }
 
-    # --- Read loads ---
+    reac_path = resolve_workspace_file(reac_name, "outputs", run_id or None)
+    reactions = _read_reactions_all(reac_path)
+    if not reactions:
+        return f"Error: could not parse reactions from '{reac_path}'."
+    reac = reactions[0]
+
     comm_path = resolve_workspace_file(comm_name, "inputs", run_id or None)
     loads = _read_loads(comm_path)
+    support_defs = _read_support_groups(comm_path)
 
-    # --- Figure setup ---
-    plt.style.use("seaborn-v0_8-whitegrid")
-    fig, ax = plt.subplots(figsize=(7, 2.3))
+    if support_type == "fixed" and support_defs:
+        unique_groups = {s["group"] for s in support_defs}
+        if len(unique_groups) >= 2:
+            support_type = "simply_supported"
+        elif any(s["type"] == "fixed" for s in support_defs):
+            support_type = "fixed"
+        elif any(s["type"] == "pinned" for s in support_defs):
+            support_type = "pinned"
+        elif any(s["type"] == "roller" for s in support_defs):
+            support_type = "roller"
+
+    scale = max(beam_length * 0.07, 0.18)
+
+    fig, ax = plt.subplots(figsize=(11.0, 3.3))
     ax.set_facecolor("white")
 
-    # Draw beam axis (in meters)
-    ax.plot([0, beam_length], [0, 0], color="black", lw=3, solid_capstyle="round")
+    ax.plot([0.0, beam_length], [0.0, 0.0], color="#1B2631", lw=3.2, solid_capstyle="round", zorder=3)
 
-    # Draw supports
     if support_type == "simply_supported":
-        _draw_support(ax, x0=0.0, y0=0.0, support_type="pinned")
-        _draw_support(ax, x0=beam_length, y0=0.0, support_type="roller")
+        _draw_support(ax, x0=0.0, y0=0.0, support_type="pinned", scale=scale)
+        _draw_support(ax, x0=beam_length, y0=0.0, support_type="roller", scale=scale)
     else:
-        _draw_support(ax, x0=0.0, y0=0.0, support_type=support_type)
+        _draw_support(ax, x0=0.0, y0=0.0, support_type=support_type, scale=scale)
 
-    # Draw reaction Fy
-    Fy = reac["Fy"]
-    if abs(Fy) > 1e-9:
-        fy_display = convert_force(
-            Fy,
-            DEFAULT_UNIT_POLICY.solver_force_unit,
-            DEFAULT_UNIT_POLICY.visualization_force_unit,
+    reaction_summaries: list[str] = []
+    for reac_item in reactions:
+        fy = float(reac_item["Fy"])
+        fx = float(reac_item["Fx"])
+        mz = float(reac_item["Mz"])
+        rx = convert_length(
+            float(reac_item["X"]),
+            DEFAULT_UNIT_POLICY.solver_coordinate_unit,
+            DEFAULT_UNIT_POLICY.visualization_length_unit,
         )
-        _draw_vertical_arrow(
-            ax,
-            x=-0.05,
-            y=0.0,
-            magnitude=Fy,
-            label=f"Fy={fy_display:.1f} {DEFAULT_UNIT_POLICY.visualization_force_unit}",
+        rx_plot = rx if rx > 1e-9 else (-0.55 * scale)
+
+        if abs(fy) > 1e-9:
+            fy_display = convert_force(
+                fy,
+                DEFAULT_UNIT_POLICY.solver_force_unit,
+                DEFAULT_UNIT_POLICY.visualization_force_unit,
+            )
+            _draw_vertical_arrow(
+                ax,
+                x=rx_plot,
+                y=0.0,
+                magnitude=fy,
+                label=f"Fy = {fy_display:.2f} {DEFAULT_UNIT_POLICY.visualization_force_unit}",
+                scale=scale,
+                color="#2874A6",
+            )
+
+        reaction_summaries.append(
+            f"{reac_item['node']}: Fx={convert_force(fx, DEFAULT_UNIT_POLICY.solver_force_unit, DEFAULT_UNIT_POLICY.visualization_force_unit):.3f} {DEFAULT_UNIT_POLICY.visualization_force_unit}, "
+            f"Fy={convert_force(fy, DEFAULT_UNIT_POLICY.solver_force_unit, DEFAULT_UNIT_POLICY.visualization_force_unit):.3f} {DEFAULT_UNIT_POLICY.visualization_force_unit}, "
+            f"Mz={convert_moment(mz, DEFAULT_UNIT_POLICY.solver_moment_unit, DEFAULT_UNIT_POLICY.visualization_moment_unit):.3f} {DEFAULT_UNIT_POLICY.visualization_moment_unit}"
         )
 
-    # Draw reaction moment Mz (fixed support only)
     if support_type == "fixed":
-        Mz = reac["Mz"]
-        if abs(Mz) > 1e-9:
-            theta = np.linspace(np.deg2rad(85), np.deg2rad(275), 100)
-            r = 0.18
-            cx, cy = -0.10, 0.0
-
-            arc_x = cx + r * np.cos(theta)
-            arc_y = cy + r * np.sin(theta)
-            ax.plot(arc_x, arc_y, color="tab:blue", lw=2.4)
-
-            # Arrowhead for moment
+        mz = float(reac["Mz"])
+        if abs(mz) > 1e-9:
+            theta = np.linspace(np.deg2rad(70), np.deg2rad(305), 120)
+            radius = 0.92 * scale
+            cx, cy = -1.12 * scale, 0.0
+            ax.plot(cx + radius * np.cos(theta), cy + radius * np.sin(theta), color="#2874A6", lw=2.2)
             ax.arrow(
-                arc_x[1],
-                arc_y[1],
-                arc_x[0] - arc_x[1],
-                arc_y[0] - arc_y[1],
-                head_width=0.04,
-                head_length=0.05,
-                fc="tab:blue",
-                ec="tab:blue",
+                cx + radius * np.cos(theta[1]),
+                cy + radius * np.sin(theta[1]),
+                (cx + radius * np.cos(theta[0])) - (cx + radius * np.cos(theta[1])),
+                (cy + radius * np.sin(theta[0])) - (cy + radius * np.sin(theta[1])),
+                head_width=0.30 * scale,
+                head_length=0.34 * scale,
+                fc="#2874A6",
+                ec="#2874A6",
                 lw=0,
                 length_includes_head=True,
             )
 
-            M_value = convert_moment(
-                Mz,
+            m_display = convert_moment(
+                mz,
                 DEFAULT_UNIT_POLICY.solver_moment_unit,
                 DEFAULT_UNIT_POLICY.visualization_moment_unit,
             )
             ax.text(
-                cx - r - 0.12,
-                cy + 0.02,
-                f"M = {M_value:.1f} {DEFAULT_UNIT_POLICY.visualization_moment_unit}",
-                color="tab:blue",
-                fontsize=10,
+                cx - 1.0 * scale,
+                cy + 0.12 * scale,
+                f"Mz = {m_display:.2f} {DEFAULT_UNIT_POLICY.visualization_moment_unit}",
+                color="#2874A6",
+                fontsize=9,
                 va="center",
                 ha="right",
                 fontweight="bold",
             )
 
-    # Draw loads (in meters)
     if loads:
-        _draw_load(ax, beam_length, loads)
+        _draw_loads(ax, beam_length, loads, scale=scale, group_pos_visual=group_pos_visual)
 
-    # Dimension line under the beam
-    arrow_y = -0.25
+    dim_y = -1.55 * scale
     ax.annotate(
         "",
-        xy=(0, arrow_y),
-        xytext=(beam_length, arrow_y),
-        arrowprops=dict(
-            arrowstyle="<->",
-            lw=1.5,
-            color="gray",
-        ),
+        xy=(0.0, dim_y),
+        xytext=(beam_length, dim_y),
+        arrowprops={"arrowstyle": "<->", "lw": 1.4, "color": "#616A6B"},
     )
-
     ax.text(
-        beam_length / 2,
-        arrow_y - 0.05,
-        f"L = {beam_length:.2f} {DEFAULT_UNIT_POLICY.visualization_length_unit}",
-        fontsize=10,
-        color="gray",
+        0.5 * beam_length,
+        dim_y - 0.20 * scale,
+        f"L = {beam_length:.3f} {DEFAULT_UNIT_POLICY.visualization_length_unit}",
+        fontsize=9,
+        color="#616A6B",
         ha="center",
         va="top",
     )
 
-    # Final plot settings
-    ax.set_xlim(-0.35, beam_length + 0.25)
-    ax.set_ylim(-0.45, 0.55)
+    x_margin = 2.1 * scale
+    ax.set_xlim(-x_margin, beam_length + x_margin)
+    ax.set_ylim(-2.0 * scale, 2.2 * scale)
     ax.set_aspect("equal", adjustable="box")
     ax.axis("off")
 
-    plt.tight_layout()
+    fig.tight_layout()
     out_path = resolve_workspace_file("freebody.png", "viz", run_id or None)
-    plt.savefig(out_path, dpi=250, bbox_inches="tight")
-    plt.close()
+    fig.savefig(out_path, dpi=FIG_DPI, bbox_inches="tight")
+    plt.close(fig)
 
-    # Return summary
     return (
-        f"✅ Free-body diagram generated.\n"
-        f"🖼 Image: {out_path}\n"
-        f"📏 Beam length: {beam_length:.2f} {DEFAULT_UNIT_POLICY.visualization_length_unit}\n"
-        f"📍 Support: {support_type}\n"
-        f"🔁 Reactions at {reac['node']}: "
-        f"Fx={convert_force(reac['Fx'], DEFAULT_UNIT_POLICY.solver_force_unit, DEFAULT_UNIT_POLICY.visualization_force_unit):.2f} {DEFAULT_UNIT_POLICY.visualization_force_unit}, "
-        f"Fy={convert_force(reac['Fy'], DEFAULT_UNIT_POLICY.solver_force_unit, DEFAULT_UNIT_POLICY.visualization_force_unit):.2f} {DEFAULT_UNIT_POLICY.visualization_force_unit}, "
-        f"Mz={convert_moment(reac['Mz'], DEFAULT_UNIT_POLICY.solver_moment_unit, DEFAULT_UNIT_POLICY.visualization_moment_unit):.2f} {DEFAULT_UNIT_POLICY.visualization_moment_unit}\n"
-        f"🎯 Loads: {len(loads)} found from {comm_name}"
+        "Free-body diagram generated.\n"
+        f"Image: {out_path}\n"
+        f"Beam length: {beam_length:.3f} {DEFAULT_UNIT_POLICY.visualization_length_unit}\n"
+        f"Support: {support_type}\n"
+        f"Reactions: {' | '.join(reaction_summaries)}\n"
+        f"Loads parsed: {len(loads)} from {comm_name}"
     )
