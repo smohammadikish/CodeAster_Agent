@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from .extraction import extract_state_update
-from .parsing import parse_beam_request
+from .parsing import MATERIAL_PATTERN, SECTION_PATTERN, parse_beam_request
 from .resolution import resolve_analysis_inputs
 
 # This module keeps the running conversation state and builds helper text
@@ -17,6 +18,58 @@ class ParameterSheet:
     # It merges new user input and reports what is still missing.
     values: dict[str, Any] = field(default_factory=dict)
     last_user_intent: str = "unknown"
+
+    @staticmethod
+    def _normalize_hint(value: Any) -> str:
+        return re.sub(r"\s+", " ", str(value or "").strip())
+
+    @staticmethod
+    def _looks_like_material(value: str) -> bool:
+        return bool(MATERIAL_PATTERN.search(value))
+
+    @staticmethod
+    def _looks_like_section(value: str) -> bool:
+        return bool(SECTION_PATTERN.search(value))
+
+    def _apply_hint_safety(self, updates: dict[str, Any]) -> None:
+        material_hint_raw = updates.get("material_hint")
+        section_hint_raw = updates.get("section_hint")
+
+        material_hint = self._normalize_hint(material_hint_raw) if material_hint_raw is not None else None
+        section_hint = self._normalize_hint(section_hint_raw) if section_hint_raw is not None else None
+
+        if material_hint:
+            if self._looks_like_section(material_hint) and not self._looks_like_material(material_hint):
+                if not section_hint:
+                    self.values["section_hint"] = material_hint
+            else:
+                self.values["material_hint"] = material_hint
+
+        if section_hint:
+            if self._looks_like_material(section_hint) and not self._looks_like_section(section_hint):
+                if not material_hint:
+                    self.values["material_hint"] = section_hint
+            else:
+                self.values["section_hint"] = section_hint
+
+    def sanitize_hints(self) -> bool:
+        changed = False
+        material_hint = self._normalize_hint(self.values.get("material_hint"))
+        section_hint = self._normalize_hint(self.values.get("section_hint"))
+
+        if material_hint and self._looks_like_section(material_hint) and not self._looks_like_material(material_hint):
+            if not section_hint:
+                self.values["section_hint"] = material_hint
+            self.values.pop("material_hint", None)
+            changed = True
+
+        if section_hint and self._looks_like_material(section_hint) and not self._looks_like_section(section_hint):
+            if not self.values.get("material_hint"):
+                self.values["material_hint"] = section_hint
+            self.values.pop("section_hint", None)
+            changed = True
+
+        return changed
 
     def merge_update_payload(self, payload: dict[str, Any]) -> None:
         updates = payload.get("updates", {})
@@ -49,12 +102,11 @@ class ParameterSheet:
             "JX_mm4",
             "AY_mm2",
             "AZ_mm2",
-            "material_hint",
-            "section_hint",
             "section_shape",
         ):
             if scalar in updates:
                 self.values[scalar] = updates[scalar]
+        self._apply_hint_safety(updates)
         self.last_user_intent = payload.get("user_intent", self.last_user_intent)
 
     def _apply_fallback_updates(self, fallback_updates: dict[str, Any]) -> dict[str, Any]:
@@ -66,6 +118,7 @@ class ParameterSheet:
         return applied
 
     def update_from_text(self, text: str, llm: Any | None = None) -> dict[str, Any]:
+        self.sanitize_hints()
         llm_payload: dict[str, Any] | None = None
         llm_updates: dict[str, Any] = {}
         if llm is not None:
@@ -102,6 +155,7 @@ class ParameterSheet:
         return resolve_analysis_inputs(self.values)["missing"]
 
     def resolved_state(self) -> dict[str, Any]:
+        self.sanitize_hints()
         return resolve_analysis_inputs(self.values)
 
     def to_dict(self) -> dict[str, Any]:
