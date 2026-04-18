@@ -17,6 +17,7 @@ from typing import Any
 EPSILON = 1e-9
 BACKEND_NAME = "verification-codeasterprj"
 BACKEND_VERSION = "0.1.0"
+N_PER_MM2_TO_PA = 1_000_000.0
 
 
 # Basic data containers used across the solver.
@@ -631,7 +632,10 @@ def _parse_code_aster_material(comm_text: str) -> dict[str, Any]:
     )
     material: dict[str, Any] = {}
     if "E" in properties:
-        material["E"] = properties["E"]
+        elastic_modulus = properties["E"]
+        if elastic_modulus < 1e7:
+            elastic_modulus *= N_PER_MM2_TO_PA
+        material["E"] = elastic_modulus
     if "NU" in properties:
         material["nu"] = properties["NU"]
     if "RHO" in properties:

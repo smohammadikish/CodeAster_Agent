@@ -14,7 +14,7 @@ def _solver_result(uy: float, rz: float) -> dict:
     }
 
 
-def test_report_normalizes_code_aster_displacement_units(tmp_path):
+def test_report_uses_explicit_code_aster_displacement_unit_conversion(tmp_path):
     outputs_dir = tmp_path / "outputs"
     outputs_dir.mkdir()
     (outputs_dir / "tab_reac.txt").write_text("", encoding="utf-8")
@@ -33,10 +33,9 @@ def test_report_normalizes_code_aster_displacement_units(tmp_path):
         code_aster_outputs_dir=outputs_dir,
     )
 
-    assert "uy_abs       3.934400e-01" in report
-    assert "rz_abs       1.045650e-01" in report
-    assert "scaled Code_Aster value by 1000" in report
-    assert "scaled Code_Aster value by 1e+06" in report
+    assert "uy_abs       3.934400e-07" in report
+    assert "rz_abs       1.045650e-07" in report
+    assert "Displacement unit normalization:" not in report
 
 
 def test_report_reads_all_code_aster_support_reactions(tmp_path):

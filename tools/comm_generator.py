@@ -9,6 +9,8 @@ from langchain_core.tools import tool
 from library.section_calculators import rectangular_section
 from storage import resolve_workspace_file
 
+PA_TO_N_PER_MM2 = 1.0 / 1_000_000.0
+
 COMM_TEMPLATE_CANTILEVER = r"""
 # __________________________ Start __________________________
 DEBUT(PAR_LOT='NON');
@@ -343,6 +345,7 @@ def generate_comm_tool(
     - Preferred section inputs are A_mm2, IY_mm4, IZ_mm4, JX_mm4, AY_mm2, AZ_mm2
     - HY_mm and HZ_mm are a compatibility fallback for a solid rectangle
     - FY_N is the load in Newtons
+    - E can be provided in Pa (default pipeline behavior) or directly in N/mm^2.
     """
 
     med_path = resolve_workspace_file(med_name, "inputs", run_id or None)
@@ -360,13 +363,17 @@ def generate_comm_tool(
         AY_mm2 = float(section["Avy"])
         AZ_mm2 = float(section["Avz"])
 
+    # Code_Aster model inputs in this project are mm and N.
+    # If E appears to be in Pa, convert to N/mm^2 for the .comm file.
+    e_n_per_mm2 = E * PA_TO_N_PER_MM2 if E > 1e7 else E
+
     template = (
         COMM_TEMPLATE_SIMPLY_SUPPORTED
         if scenario == "simply_supported_midpoint_load"
         else COMM_TEMPLATE_CANTILEVER
     )
     content = template.format(
-        E=E,
+        E=e_n_per_mm2,
         NU=NU,
         RHO=RHO,
         A=A_mm2,

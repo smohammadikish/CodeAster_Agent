@@ -1,4 +1,4 @@
-"""Generate comparison reports between analysis methods.
+﻿"""Generate comparison reports between analysis methods.
 
 This module compares the canonical result format produced by the integrated
 manual solver and the integrated OpenSees solver.
@@ -11,7 +11,19 @@ from pathlib import Path
 from typing import Any
 
 REPORT_ZERO_TOL = 1e-9
+MM_TO_M = 1.0 / 1000.0
 
+
+def _build_text_table(
+    headers: list[str], rows: list[list[str]], align_right: set[int] | None = None
+) -> list[str]:
+    """Build a compact markdown-style table without padded cells."""
+    _ = align_right  # keep backward compatibility with existing call sites
+    lines = ["| " + " | ".join(headers) + " |"]
+    lines.append("| " + " | ".join("---" for _ in headers) + " |")
+    for row in rows:
+        lines.append("| " + " | ".join(row) + " |")
+    return lines
 
 def load_result_json(filepath: Path) -> dict[str, Any]:
     """Load a result JSON file."""
@@ -46,11 +58,11 @@ def _load_code_aster_reactions(path: Path) -> list[dict[str, Any]]:
         reactions.append(
             {
                 "name": str(tokens[4]),
-                "x": float(tokens[5]) / 1000.0,
+                "x": float(tokens[5]) * MM_TO_M,
                 "values": (
                     float(tokens[7]),
                     float(tokens[8]),
-                    float(tokens[12]) / 1000.0,
+                    float(tokens[12]) * MM_TO_M,
                 ),
             }
         )
@@ -86,8 +98,9 @@ def _load_code_aster_displacements(path: Path) -> dict[str, dict[str, float]]:
         tokens = raw_line.split()
         if len(tokens) < 13:
             continue
-        x_value = float(tokens[5]) / 1000.0
-        uy_value = abs(float(tokens[8]))
+        x_value = float(tokens[5]) * MM_TO_M
+        # Code_Aster model input uses mm and N; convert displacement to SI for comparison.
+        uy_value = abs(float(tokens[8])) * MM_TO_M
         rz_value = abs(float(tokens[12]))
         if uy_value >= uy_best["value"]:
             uy_best = {"value": uy_value, "x": x_value}
@@ -116,10 +129,10 @@ def _load_code_aster_internal_forces(path: Path) -> dict[str, dict[str, float]]:
         tokens = [token.strip() for token in raw_line.split(";")]
         if len(tokens) < 16:
             continue
-        x_value = abs(float(tokens[7])) / 1000.0
+        x_value = abs(float(tokens[7])) * MM_TO_M
         n_value = abs(float(tokens[10]))
         v_value = abs(float(tokens[11]))
-        m_value = abs(float(tokens[15])) / 1000.0
+        m_value = abs(float(tokens[15])) * MM_TO_M
         if n_value >= results["N_abs"]["value"]:
             results["N_abs"] = {"value": n_value, "x": x_value}
         if v_value >= results["V_abs"]["value"]:
@@ -232,55 +245,6 @@ def _agreement_bucket(rel_pct: float) -> str:
     if rel_pct < 5.0:
         return "acceptable"
     return "poor"
-
-
-def _best_unit_scale(
-    raw_value: float,
-    reference_value: float,
-    candidate_factors: tuple[float, ...],
-) -> tuple[float, float]:
-    """Pick the scale factor that best aligns a raw value with a reference."""
-    if abs(raw_value) <= 1e-12 or abs(reference_value) <= 1e-12:
-        return raw_value, 1.0
-
-    best_value = raw_value
-    best_factor = 1.0
-    best_error = _relative_percent(reference_value, raw_value)
-
-    for factor in candidate_factors:
-        candidate = raw_value * factor
-        error = _relative_percent(reference_value, candidate)
-        if error < best_error:
-            best_value = candidate
-            best_factor = factor
-            best_error = error
-
-    return best_value, best_factor
-
-
-def _normalize_code_aster_displacement_metric(
-    metric: str,
-    code_aster_value: float,
-    reference_value: float,
-) -> tuple[float, float]:
-    """Auto-scale Code_Aster displacement values onto the solver comparison scale."""
-    if metric == "uy_abs":
-        # Allow common length-unit mismatches between m, cm, and mm.
-        return _best_unit_scale(
-            code_aster_value,
-            reference_value,
-            (1.0, 10.0, 100.0, 1000.0, 0.1, 0.01, 0.001),
-        )
-
-    if metric == "rz_abs":
-        # Allow common rotation-unit mismatches between rad, mrad, and urad.
-        return _best_unit_scale(
-            code_aster_value,
-            reference_value,
-            (1.0, 1000.0, 1_000_000.0, 0.001, 0.000001),
-        )
-
-    return code_aster_value, 1.0
 
 
 def generate_comparison_report(
@@ -437,7 +401,6 @@ def generate_comparison_report(
     )
     report.append("-" * 120)
 
-    displacement_notes: list[str] = []
     for metric in ("uy_abs", "rz_abs"):
         code_aster_disp = code_aster_displacements.get(metric, {"value": 0.0, "x": 0.0})
         manual_disp = manual_displacements.get(metric, {"value": 0.0, "x": 0.0})
@@ -446,11 +409,7 @@ def generate_comparison_report(
         o_val = opensees_disp["value"]
         mo_pct = _relative_percent(o_val, m_val)
         avg_val = (m_val + o_val) / 2.0
-        c_val, scale_factor = _normalize_code_aster_displacement_metric(
-            metric,
-            code_aster_disp["value"],
-            avg_val,
-        )
+        c_val = code_aster_disp["value"]
         avg_vs_ca_pct = _relative_percent(c_val, avg_val)
         report.append(
             f"{metric:<12} {c_val:>12.6e} {code_aster_disp['x']:>7.4f} "
@@ -458,10 +417,6 @@ def generate_comparison_report(
             f"{m_val:>14.6e} {manual_disp['x']:>9.4f} "
             f"{mo_pct:>8.2f}% {avg_vs_ca_pct:>10.2f}%"
         )
-        if abs(scale_factor - 1.0) > 1e-12:
-            displacement_notes.append(
-                f"  - {metric}: scaled Code_Aster value by {scale_factor:g} before comparison."
-            )
         total_comparisons += 1
         bucket = _agreement_bucket(max(mo_pct, avg_vs_ca_pct))
         if bucket == "excellent":
@@ -471,12 +426,24 @@ def generate_comparison_report(
         else:
             poor += 1
 
-    if displacement_notes:
-        report.append("\nDisplacement unit normalization:")
-        report.extend(displacement_notes)
+    report.append("\n" + "=" * 80)
+    report.append("4. METHOD AND FORMULATION NOTES")
+    report.append("=" * 80)
+    report.append(
+        "Code_Aster uses POU_D_T beam elements (Timoshenko-type behavior with shear deformation)."
+    )
+    report.append(
+        "OpenSees uses elasticBeamColumn in the current workflow (Euler-Bernoulli formulation)."
+    )
+    report.append(
+        "Manual solver uses closed-form statically determinate beam equations (Euler-Bernoulli assumptions)."
+    )
+    report.append(
+        "Small support moments near machine precision (around 1e-12) are numerical noise and can be treated as zero."
+    )
 
     report.append("\n" + "=" * 80)
-    report.append("4. ANALYSIS SUMMARY")
+    report.append("5. ANALYSIS SUMMARY")
     report.append("=" * 80)
     report.append("\nComparison Statistics:")
 
@@ -505,3 +472,4 @@ def generate_comparison_report(
     report.append("END OF COMPARISON REPORT")
     report.append("=" * 80)
     return "\n".join(report)
+

@@ -14,6 +14,7 @@ DEFAULT_WORKSPACE = REPO_ROOT / "workspace"
 
 _REQUIRED_COMPANION_SUFFIXES = (".comm", ".geo", ".export")
 _OPTIONAL_COMPANION_SUFFIXES = (".med",)
+N_PER_MM2_TO_PA = 1_000_000.0
 
 
 @dataclass(slots=True)
@@ -275,9 +276,15 @@ def _parse_comm_file(path: Path) -> dict[str, object]:
         )
 
     load_factor = _extract_single_factor_block(load_block, "FORCE_NODALE")
+    elastic_modulus = float(
+        _search(material_block, r"E\s*=\s*([0-9.eE+-]+)", "E")
+    )
+    if elastic_modulus < 1e7:
+        elastic_modulus *= N_PER_MM2_TO_PA
+
     return {
         "material": {
-            "E": float(_search(material_block, r"E\s*=\s*([0-9.eE+-]+)", "E")),
+            "E": elastic_modulus,
         },
         "section": section,
         "constraints": constraints,

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import sys
 import time
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +60,7 @@ CHART_DISPLAY_NAMES = {
 
 
 def _create_workspace_id() -> str:
-    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     return f"chat_{stamp}_{uuid.uuid4().hex[:6]}"
 
 
@@ -126,6 +127,55 @@ def _stream_typewriter_text(text: str, delay_seconds: float = 0.02):
     for chunk in text:
         yield chunk
         time.sleep(delay_seconds)
+
+
+def _extract_labeled_line(text: str, label: str) -> str | None:
+    match = re.search(rf"^{re.escape(label)}\s*(.+)$", text, flags=re.MULTILINE)
+    return match.group(1).strip() if match else None
+
+
+def _format_frontend_status_message(text: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return raw
+
+    if "Verification finished" in raw and "Run ID:" in raw:
+        run_id = _extract_labeled_line(raw, "Run ID:")
+        verification_dir = _extract_labeled_line(raw, "Verification:")
+        comparison_path = _extract_labeled_line(raw, "Comparison:")
+
+        if "Verification finished successfully." in raw:
+            status_line = "Verification completed successfully."
+        elif "Verification finished with partial results." in raw:
+            status_line = "Verification completed with partial results."
+        else:
+            status_line = "Verification completed."
+
+        lines = [status_line]
+        if run_id:
+            lines.append(f"Run ID: {run_id}")
+        if verification_dir:
+            lines.append(f"Results saved in workspace: {verification_dir}")
+        if comparison_path:
+            lines.append(f"Comparison report: {comparison_path}")
+        return "\n".join(lines)
+
+    if "Simulation finished successfully." in raw and "Run ID:" in raw:
+        run_id = _extract_labeled_line(raw, "Run ID:")
+        run_folder = _extract_labeled_line(raw, "Run folder:")
+        scenario = _extract_labeled_line(raw, "Scenario:")
+
+        lines = ["Analysis completed successfully."]
+        if run_id:
+            lines.append(f"Run ID: {run_id}")
+        if run_folder:
+            lines.append(f"Results saved in workspace: {run_folder}")
+        if scenario:
+            lines.append(f"Scenario: {scenario}")
+        lines.append("Would you like to run verification too?")
+        return "\n".join(lines)
+
+    return raw
 
 
 def _query_runs() -> list[dict[str, Any]]:
@@ -328,10 +378,11 @@ def _process_message(user_text: str, user_already_appended: bool = False) -> Non
         return
 
     def _respond(assistant_text: str) -> None:
+        formatted_text = _format_frontend_status_message(assistant_text)
         if user_already_appended:
-            _append_assistant_message(assistant_text)
+            _append_assistant_message(formatted_text)
         else:
-            _append_exchange(text, assistant_text)
+            _append_exchange(text, formatted_text)
 
     ambiguous = get_ambiguous_dimension_message(text)
     if ambiguous:
@@ -525,19 +576,14 @@ def _render_parameter_summary() -> None:
     ]
     df = pd.DataFrame(rows)
 
-    display_df = df[["Field", "Value"]].copy()
-    has_value_by_index = df["has_value"].to_dict()
-
-    def _color_row(row: pd.Series) -> list[str]:
-        bg = "#d4edda" if bool(has_value_by_index.get(row.name, False)) else "#fff3cd"
-        return [f"background-color: {bg}" for _ in row]
+    display_df = df[["Field", "Value", "has_value"]].copy()
+    display_df["Value"] = display_df["Value"].astype(str)
+    display_df["Status"] = display_df["has_value"].map(lambda ok: "OK" if bool(ok) else "Missing")
+    display_df = display_df[["Status", "Field", "Value"]]
 
     st.dataframe(
-        display_df.style.apply(
-            _color_row,
-            axis=1,
-        ),
-        use_container_width=True,
+        display_df,
+        width='stretch',
         hide_index=True,
     )
     if missing:
@@ -619,7 +665,7 @@ def main() -> None:
     with st.sidebar:
         if st.button(
             "New Chat",
-            use_container_width=True,
+            width='stretch',
             help="با زدن این دکمه یک چت جدید ساخته می‌شود و می‌توانید تحلیل‌های جدید را در یک فضای مجزا بررسی کنید.",
         ):
             _start_new_chat()
@@ -658,7 +704,8 @@ def main() -> None:
                         "created_at": run["created_at"],
                     }
                 )
-            st.dataframe(rows, use_container_width=True, hide_index=True)
+            run_df = pd.DataFrame(rows).fillna("").astype(str)
+            st.dataframe(run_df, width='stretch', hide_index=True)
 
         st.subheader("Parameter Sheet")
         _render_parameter_summary()
@@ -692,7 +739,7 @@ def main() -> None:
                 key="chat_draft",
             )
         with send_col:
-            send_clicked = st.form_submit_button("Send", type="primary", use_container_width=True)
+            send_clicked = st.form_submit_button("Send", type="primary", width='stretch')
     if send_clicked and st.session_state.chat_draft.strip():
         submitted_text = st.session_state.chat_draft.strip()
         _append_user_message(submitted_text)
@@ -712,19 +759,19 @@ def main() -> None:
     missing_inputs = get_missing_fields_for_execution(st.session_state.sheet)
     if not missing_inputs and not st.session_state.simulation_executed:
         run_cols = st.columns([1, 1, 1])
-        if run_cols[1].button("Run (Yes)", key="quick_run_yes", use_container_width=True):
+        if run_cols[1].button("Run (Yes)", key="quick_run_yes", width='stretch'):
             with st.spinner("Running simulation, please wait..."):
                 _process_message("yes")
             _save_active_workspace_state()
             st.rerun()
     if st.session_state.verification_prompt_pending:
         verify_cols = st.columns([2, 1, 1, 2])
-        if verify_cols[1].button("Run Verification (Yes)", key="quick_verify_yes", use_container_width=True):
+        if verify_cols[1].button("Run Verification (Yes)", key="quick_verify_yes", width='stretch'):
             with st.spinner("Running verification, please wait..."):
                 _process_message("yes")
             _save_active_workspace_state()
             st.rerun()
-        if verify_cols[2].button("Skip Verification (No)", key="quick_verify_no", use_container_width=True):
+        if verify_cols[2].button("Skip Verification (No)", key="quick_verify_no", width='stretch'):
             _process_message("no")
             _save_active_workspace_state()
             st.rerun()
@@ -745,7 +792,7 @@ def main() -> None:
                 else:
                     cols = st.columns(3)
                     for idx, item in enumerate(imgs):
-                        cols[idx % 3].image(item["path"], caption=item["label"], use_container_width=True)
+                        cols[idx % 3].image(item["path"], caption=item["label"], width='stretch')
 
         with tabs[1]:
             _tab_help_modal(
@@ -787,7 +834,7 @@ def main() -> None:
                     path = Path(art["path"])
                     st.caption(str(path))
                     if art["kind"] == "image":
-                        st.image(str(path), use_container_width=True)
+                        st.image(str(path), width='stretch')
                     elif art["kind"] == "json":
                         st.json(json.loads(path.read_text(encoding="utf-8", errors="replace")))
                     elif art["kind"] == "text":
@@ -848,7 +895,7 @@ def main() -> None:
                         slots[idx].image(
                             matched["path"],
                             caption=f"{_run_display_name(next(r for r in runs if r['run_id'] == chosen_run))} | {_chart_display_name(selected_chart)}",
-                            use_container_width=True,
+                            width='stretch',
                         )
                     else:
                         slots[idx].warning(f"{_chart_display_name(selected_chart)} not found in selected run.")
