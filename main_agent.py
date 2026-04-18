@@ -10,48 +10,31 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 # ----------------------------
 # Load environment
 # ----------------------------
 from langchain.agents import AgentExecutor, create_openai_tools_agent
-from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import tool
 # LangChain imports
 from langchain_openai import ChatOpenAI
 
 from env_loader import load_env  # noqa: E402
-from input_parser import (ParameterSheet, build_state_aware_input,
-                          parse_beam_request, resolve_analysis_inputs)
-from library import (list_materials, list_sections,
-                     resolve_material_family_name, resolve_section_family_name)
+from input_parser import ParameterSheet, build_state_aware_input
 from storage import (create_run_id, ensure_base_dirs, ensure_run_dirs,
-                     finalize_run, get_registered_run_paths, record_artifact,
+                     finalize_run, record_artifact,
                      record_tool_event, register_run, resolve_workspace_file,
                      utc_now_iso)
-from tools.catalog_tools import (build_parametric_section_catalog_tool,
-                                 get_material_catalog_tool,
-                                 get_section_catalog_tool,
-                                 list_material_catalog_tool,
-                                 list_section_catalog_tool)
 from tools.comm_generator import generate_comm_tool
 from tools.export_generator import generate_export_tool
 from tools.geo_generator import generate_geo_tool
 from tools.mesher_gmsh import mesh_with_gmsh_tool
 from tools.run_aster_tool import run_code_aster_tool
 from tools.validators import file_exists
-from tools.visualize_tool import (visualize_freebody_tool,
-                                  visualize_mfz_contour_tool,
-                                  visualize_resu_tool, visualize_stress_tool)
+from tools.visualize_tool import visualize_stress_tool
 from units import DEFAULT_UNIT_POLICY, normalize_user_params_mixed_units
-
-VERIFICATION_ROOT = Path(__file__).resolve().parent / "verification"
-if str(VERIFICATION_ROOT) not in sys.path:
-    sys.path.insert(0, str(VERIFICATION_ROOT))
-
-from orchestrator import run_both_solvers
 
 # ============================================================
 #  Setup
@@ -185,13 +168,6 @@ def extract_scenario_from_text(user_input: str) -> str | None:
 def get_sheet_scenario(sheet: ParameterSheet) -> str | None:
     scenario = sheet.to_dict().get("scenario")
     return str(scenario) if scenario else None
-
-
-def get_missing_fields_for_execution(sheet: ParameterSheet) -> list[str]:
-    missing = list(sheet.missing_required_fields())
-    if not get_sheet_scenario(sheet):
-        return ["scenario", *missing]
-    return missing
 
 
 def _tool_result_indicates_failure(result: Any) -> bool:
@@ -564,19 +540,6 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     console_print("\nVisualization phase ...")
     visualization_failures = []
 
-    visualize_resu_result = safe_call(
-        visualize_resu_tool,
-        "",
-        expected_artifacts=[
-            ("deflection_plot", "workspace", resolve_workspace_file("beam_job_def.png", "viz")),
-            ("rotation_plot", "workspace", resolve_workspace_file("beam_job_rot.png", "viz")),
-        ],
-        resu_name="beam_job.resu",
-    )
-    step_results.append(visualize_resu_result)
-    if not visualize_resu_result["ok"]:
-        visualization_failures.append("visualize_resu_tool")
-
     visualize_stress_result = safe_call(
         visualize_stress_tool,
         "",
@@ -589,35 +552,6 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     step_results.append(visualize_stress_result)
     if not visualize_stress_result["ok"]:
         visualization_failures.append("visualize_stress_tool")
-
-    visualize_mfz_result = safe_call(
-        visualize_mfz_contour_tool,
-        "",
-        expected_artifacts=[
-            ("mfz_contour", "workspace", resolve_workspace_file("mfz_contour.png", "viz"))
-        ],
-        stress_name="tab_sie.txt",
-    )
-    step_results.append(visualize_mfz_result)
-    if not visualize_mfz_result["ok"]:
-        visualization_failures.append("visualize_mfz_contour_tool")
-
-    visualize_freebody_result = safe_call(
-        visualize_freebody_tool,
-        "",
-        expected_artifacts=[
-            ("freebody_plot", "workspace", resolve_workspace_file("freebody.png", "viz"))
-        ],
-        support_type=(
-            "simply_supported"
-            if params.get("scenario") == SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD
-            else "fixed"
-        ),
-        reac_name="tab_reac.txt",
-    )
-    step_results.append(visualize_freebody_result)
-    if not visualize_freebody_result["ok"]:
-        visualization_failures.append("visualize_freebody_tool")
 
     if visualization_failures:
         return (
@@ -681,12 +615,8 @@ def run_hybrid_pipeline_with_run_storage(
             ("tab_sie", "outputs", resolve_workspace_file("tab_sie.txt", "outputs", run_id)),
         ]
         viz = [
-            ("deflection_plot", "viz", resolve_workspace_file("beam_job_def.png", "viz", run_id)),
-            ("rotation_plot", "viz", resolve_workspace_file("beam_job_rot.png", "viz", run_id)),
             ("shear_plot", "viz", resolve_workspace_file("shear_diagram.png", "viz", run_id)),
             ("moment_plot", "viz", resolve_workspace_file("moment_diagram.png", "viz", run_id)),
-            ("mfz_contour", "viz", resolve_workspace_file("mfz_contour.png", "viz", run_id)),
-            ("freebody_plot", "viz", resolve_workspace_file("freebody.png", "viz", run_id)),
         ]
 
         geo_result = safe_call(
@@ -776,50 +706,15 @@ def run_hybrid_pipeline_with_run_storage(
         console_print("\nVisualization phase ...")
         visualization_failures = []
 
-        visualize_resu_result = safe_call(
-            visualize_resu_tool,
-            run_id,
-            expected_artifacts=viz[0:2],
-            resu_name="beam_job.resu",
-        )
-        step_results.append(visualize_resu_result)
-        if not visualize_resu_result["ok"]:
-            visualization_failures.append("visualize_resu_tool")
-
         visualize_stress_result = safe_call(
             visualize_stress_tool,
             run_id,
-            expected_artifacts=viz[2:4],
+            expected_artifacts=viz,
             stress_name="tab_sie.txt",
         )
         step_results.append(visualize_stress_result)
         if not visualize_stress_result["ok"]:
             visualization_failures.append("visualize_stress_tool")
-
-        visualize_mfz_result = safe_call(
-            visualize_mfz_contour_tool,
-            run_id,
-            expected_artifacts=[viz[4]],
-            stress_name="tab_sie.txt",
-        )
-        step_results.append(visualize_mfz_result)
-        if not visualize_mfz_result["ok"]:
-            visualization_failures.append("visualize_mfz_contour_tool")
-
-        visualize_freebody_result = safe_call(
-            visualize_freebody_tool,
-            run_id,
-            expected_artifacts=[viz[5]],
-            support_type=(
-                "simply_supported"
-                if params.get("scenario") == SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD
-                else "fixed"
-            ),
-            reac_name="tab_reac.txt",
-        )
-        step_results.append(visualize_freebody_result)
-        if not visualize_freebody_result["ok"]:
-            visualization_failures.append("visualize_freebody_tool")
 
         meta_path = resolve_workspace_file("run.json", "meta", run_id)
         with open(meta_path, "w", encoding="utf-8") as f:
@@ -896,10 +791,9 @@ def run_full_pipeline(
     hy_unit: str = DEFAULT_INPUT_LENGTH_UNIT,
     hz_unit: str = DEFAULT_INPUT_LENGTH_UNIT,
     force_unit: str = DEFAULT_INPUT_FORCE_UNIT,
-    confirm: bool = False,
 ) -> str:
     """
-    Run the complete simulation pipeline ONLY after explicit user confirmation.
+    Run the complete simulation pipeline when required inputs are available.
 
     IMPORTANT UNITS (FOR THE USER / LLM SIDE):
     - length_m: beam length in `length_unit`
@@ -912,10 +806,8 @@ def run_full_pipeline(
     - n_elems: number of finite elements
 
     Rules:
-    - If ANY required parameter is missing → return an instructional message
-      instead of running the pipeline.
-    - If confirm=False → return a message asking the agent to request confirmation.
-    - If all parameters exist AND confirm=True → run the deterministic pipeline.
+    - If any required parameter is missing, return an instructional message.
+    - If all parameters exist, run the deterministic pipeline.
     """
 
     if scenario is None:
@@ -1006,14 +898,7 @@ def run_full_pipeline(
         if validation_message:
             return validation_message
 
-    # 2) Check for confirmation flag
-    if confirm is False:
-        return (
-            "All parameters are provided, but the simulation has NOT been confirmed.\n"
-            "Ask the user to confirm the full simulation with the stated units."
-        )
-
-    # 3) All good → run pipeline
+    # 2) All good -> run pipeline
     params = coerce_params(
         {
             "length_m": length_m,
@@ -1034,7 +919,7 @@ def run_full_pipeline(
     )
     params["scenario"] = scenario
     logging.info(
-        f"run_full_pipeline confirmed for scenario={scenario} with params (user units):\n"
+        f"run_full_pipeline started for scenario={scenario} with params (user units):\n"
         + dict_to_pretty_json(params)
     )
 
@@ -1061,156 +946,28 @@ def run_full_pipeline(
 
 
 def build_system_prompt() -> str:
-    return """You are a mechanical simulation assistant specialized in beam analysis using Code_Aster and Gmsh. You support multi-step conversations where the user incrementally provides beam geometry, material properties, cross-section definitions, and loads.
+    return """You are a mechanical simulation assistant specialized in beam analysis using Code_Aster and Gmsh.
 
-============================================================
-SCENARIOS (CRITICAL)
-============================================================
-- You support exactly these two scenario names:
-  - cantilever_tip_load
-  - simply_supported_midpoint_load
-- Scenario meanings:
-  - cantilever_tip_load = cantilever beam, fixed at one end, point load at the free tip
-  - simply_supported_midpoint_load = simply supported beam, pin at one end, roller at the other, point load at midspan
-- You must determine the scenario first before attempting to run anything.
-- If the scenario is missing, explicitly ask the user to choose one of those two exact scenario names.
-- Never invent a scenario.
-- Both supported scenarios can proceed through the execution path in the current version.
+You support exactly these two scenario names:
+- cantilever_tip_load
+- simply_supported_midpoint_load
 
-============================================================
-UNITS CONVENTION (CRITICAL)
-============================================================
-- The user may provide mixed units such as m, cm, mm, N, or kN.
-- You must accept explicit user units and convert them internally.
-- Do not ask the user to manually convert 20 cm to 0.20 m or 1.2 kN to 1200 N.
-- Keep every numeric value together with its own unit while collecting data.
-- If the user says '5 m long, 20 cm high, 12 cm wide, 1.2 kN load', treat that as valid.
-- If the user gives a named material or a named section from the catalog, prefer resolving it instead of asking for raw properties.
-- Only ask follow-up questions when a value is missing or a unit is absent and ambiguous.
+Do not call run_full_pipeline until all required inputs are known:
+- scenario
+- length_m
+- n_elems
+- E, NU, RHO
+- section definition (A/IY/IZ/JX/AY/AZ, or HY and HZ)
+- FY
 
-============================================================
-CATALOG CAPABILITIES
-============================================================
-- Material families in the catalog: steel, aluminum, concrete, wood.
-- Section families in the catalog: steel, aluminum, concrete, wood.
-- Parametric sections are available for rectangle and circle.
-- Catalog materials return solver-ready values such as E, NU, and RHO.
-- Catalog sections return Code_Aster-ready values A, IY, IZ, JX, AY, and AZ.
-- Concrete can use a formula fallback when the exact class is not listed.
+When calling run_full_pipeline, pass explicit units:
+- length_unit for length_m
+- hy_unit for HY
+- hz_unit for HZ
+- force_unit for FY
 
-============================================================
-BEHAVIOR RULES - FOLLOW THESE STRICTLY
-============================================================
-
-RESPONSE STYLE
-- Keep normal replies compact and guided.
-- Prefer 1 short intro sentence plus at most 4 bullets.
-- Ask only for the missing items needed for the next step.
-- Do not produce long dumps of solver properties unless the user explicitly asks for them.
-- If the user asks for suggestions, give a short recommendation with a brief reason, then ask the next missing question.
-- When listing missing inputs, prefer plain user language such as 'material' or 'section' instead of raw solver fields like E, NU, RHO, A, IY, IZ, JX, AY, AZ unless the user asked for raw properties.
-- For a partially defined beam, prefer wording like:
-  "Please add:
-  - elements
-  - material, or I can suggest from my Eurocode-based database
-  - section, or I can suggest one"
-- Never invent catalog suggestions. Any suggested material or section must come from the real local catalog/database or from parametric section formulas.
-
-1) Use catalog tools when the user asks for available materials, available sections, or named catalog items.
-   - Use list_material_catalog for material lists.
-   - Use get_material_catalog for one named material.
-   - Use list_section_catalog for section lists.
-   - Use get_section_catalog for one named section.
-   - Use build_parametric_section_catalog for simple rectangle or circle sections.
-   - Never invent catalog contents from memory.
-   - If the user selects only a family such as steel, aluminum, concrete, or wood, list the actual entries available in that family.
-
-2) Do not call run_full_pipeline until all required parameters are known:
-   - scenario
-   - length_m  (beam length)
-   - n_elems   (integer)
-   - E, NU, RHO or a resolvable material name
-   - HY and HZ for the rectangular section, unless an equivalent section definition has already been resolved
-   - FY        (load)
-
-3) When calling run_full_pipeline, pass units explicitly per field:
-   - scenario
-   - length_unit for length_m
-   - hy_unit for HY
-   - hz_unit for HZ
-   - force_unit for FY
-   Allowed length units: m, cm, mm. Allowed force units: N, kN.
-
-4) If any required value is missing:
-   - Ask follow-up questions.
-   - Do not assume defaults unless the user explicitly says 'Use default values'.
-
-5) When the user gives a known material or section name:
-   - Prefer the internal catalog and formulas to resolve properties.
-   - Use Eurocode references for catalog materials.
-   - For concrete grades not in the table, use the formula fallback.
-   - If the user says a shorthand concrete grade like C25, resolve it to the closest standard catalog grade such as C25/30 when available.
-   - If the user gives a concrete grade not present in the table, do not ask again; calculate the concrete properties directly with the Eurocode formula from the provided fck.
-   - When mentioning the concrete fallback, say clearly that E is calculated with the Eurocode formula based on the user's fck.
-
-5a) When suggesting materials or sections from the catalog:
-   - Explicitly say they are suggestions from the local database/catalog.
-   - Mention that many catalog items are based on Eurocode references.
-   - Make clear they are not the only valid choices.
-   - Tell the user they may instead provide their own material properties or section properties/dimensions.
-   - Do not promise an internet search unless that capability is actually available in the current app/session.
-
-6) When the user does not know material properties and no catalog match exists:
-   - Do not call run_full_pipeline.
-   - Ask for either a valid catalog material or explicit values for E, NU, and RHO.
-
-7) When all parameters are known:
-   - Summarize them clearly and preserve the user's units.
-   - Keep the summary short and user-facing.
-   - For cantilever_tip_load, make the engineering setup explicit: cantilever beam, fixed at one end, point load at the free tip.
-   - If a concrete material was resolved by formula instead of the catalog table, mark it with '(calculated by Eurocode formula)'.
-   - Then ask:
-       "Do you confirm running the simulation with these values?"
-   - Never call run_full_pipeline unless the user explicitly confirms with:
-       'yes', 'confirm', 'ok run', or similar.
-
-8) If the user responds with 'no' or 'not yet':
-   - Do not call any tools.
-   - Ask what they want to modify.
-
-9) FINALIZATION / STOP RULES:
-   If the user says any of these in the conversation:
-       'stop', 'finish', 'end', 'cancel', 'no more', 'terminate', "that's enough", 'done'
-   - Immediately stop all simulation workflow.
-   - Do not call any tools.
-   - Simply acknowledge and wait for the next input (or let the CLI handle exit).
-   - Never restart the simulation pipeline unless the user explicitly asks.
-
-10) Never rerun run_full_pipeline automatically.
-   - A simulation may run only once per explicit confirmation.
-   - Never repeat runs after the user says it is finished.
-
-11) If the user gives a geometry number without an explicit unit (for example 'hy 20' or 'hz 10'):
-   - Treat it as ambiguous.
-   - Ask the user to restate that dimension with units.
-   - Never guess whether it means m, cm, or mm.
-
-12) Maintain conversation memory and be conversational and helpful, but follow all rules above with 100% strictness.
-
-============================================================
-YOUR GOAL
-============================================================
-Guide the user step-by-step, help determine missing values, ensure explicit confirmation before executing any tools, and respect all stop commands."""
-
-
-def is_confirmation_input(user_input: str) -> bool:
-    text = user_input.strip().lower()
-    return bool(
-        re.search(
-            r"\b(yes|confirm|confirmed|i confirm|ok run|run it|yes run it|please run)\b",
-            text,
-        )
-    )
+If a required value is missing, ask only for the missing value. Keep responses compact.
+Never request confirmation before running."""
 
 
 def is_exit_input(user_input: str) -> bool:
@@ -1221,219 +978,6 @@ def is_exit_input(user_input: str) -> bool:
             text,
         )
     )
-
-
-def build_post_run_message() -> str:
-    return "Already run for these inputs. Change a parameter for a new run."
-
-
-def build_post_success_message(run_output: str) -> str:
-    lines = [line.rstrip() for line in str(run_output).splitlines() if line.strip()]
-    kept: list[str] = []
-    for line in lines:
-        if line.startswith("Input units:") or line.startswith("Used parameters:"):
-            break
-        kept.append(line)
-    if not kept:
-        kept = ["Simulation finished successfully."]
-    kept.append("Run verification too?")
-    return "\n".join(kept)
-
-
-def is_successful_run_output(run_output: str) -> bool:
-    text = str(run_output)
-    return "Simulation finished successfully." in text or (
-        "Simulation completed successfully, but some visualization steps failed:" in text
-    )
-
-
-def build_post_run_idle_message() -> str:
-    return "Change parameters for another run, or finish."
-
-
-def is_negative_response(user_input: str) -> bool:
-    text = user_input.strip().lower()
-    return bool(re.search(r"\b(no|not now|no thanks|skip|later)\b", text))
-
-
-def is_verification_input(user_input: str) -> bool:
-    text = user_input.strip().lower()
-    return bool(re.search(r"\b(verify|verification|verif|validate|check results)\b", text))
-
-
-def extract_run_id_and_folder(run_output: str) -> tuple[str | None, Path | None]:
-    run_id_match = re.search(r"Run ID:\s*(\S+)", run_output)
-    run_folder_match = re.search(r"Run folder:\s*(.+)", run_output)
-    run_id = run_id_match.group(1).strip() if run_id_match else None
-    run_folder = Path(run_folder_match.group(1).strip()) if run_folder_match else None
-    return run_id, run_folder
-
-
-def run_verification_for_run(run_id: str) -> str:
-    run_paths = get_registered_run_paths(run_id)
-    if run_paths is None or not run_paths.root.exists():
-        return f"Verification could not start because run '{run_id}' was not found."
-
-    input_dir = run_paths.inputs
-    verification_dir = run_paths.root / "verification"
-
-    if not input_dir.exists():
-        return (
-            "Verification could not start because the run inputs folder is missing.\n"
-            f"Expected folder: {input_dir}"
-        )
-
-    required_files = ["model.comm", "model.export", "model.geo"]
-    missing_files = [name for name in required_files if not (input_dir / name).exists()]
-    if missing_files:
-        return (
-            "Verification could not start because the run inputs are incomplete.\n"
-            f"Missing files in {input_dir}: {', '.join(missing_files)}"
-        )
-
-    try:
-        _, manual_result, opensees_result, comparison = run_both_solvers(
-            input_dir,
-            verification_root=verification_dir,
-        )
-    except Exception as exc:
-        logging.exception("Verification failed for run_id=%s", run_id)
-        return f"Verification failed for run {run_id}: {exc}"
-
-    if manual_result and opensees_result:
-        status_line = "Verification finished successfully."
-    elif manual_result or opensees_result:
-        status_line = "Verification finished with partial results."
-    else:
-        status_line = "Verification failed."
-
-    return (
-        f"{status_line}\n"
-        f"Run ID: {run_id}\n"
-        f"Verification: {verification_dir.resolve()}\n"
-        f"Manual: {(verification_dir / 'manual' / 'result.json').resolve()}\n"
-        f"OpenSees: {(verification_dir / 'opensees' / 'results.json').resolve()}\n"
-        f"Comparison: {(verification_dir / 'comparison' / 'comparison_report.txt').resolve()}"
-    )
-
-
-def get_sheet_signature(sheet: ParameterSheet) -> str:
-    return json.dumps(sheet.to_dict(), sort_keys=True, ensure_ascii=True)
-
-
-def build_confirmation_summary(sheet: ParameterSheet) -> str:
-    resolution = resolve_analysis_inputs(sheet.to_dict())
-    values = resolution["resolved"]
-    scenario = get_sheet_scenario(sheet)
-    material = values.get("resolved_material")
-    section = values.get("resolved_section")
-    material_suffix = (
-        " (calculated by Eurocode formula)"
-        if material and material.get("derived")
-        else ""
-    )
-    material_line = (
-        f"- Material: {material.get('name')} ({material.get('reference')}){material_suffix}"
-        if material
-        else ""
-    )
-    section_name = section.get("Profile") or section.get("Section") or section.get("shape") if section else None
-    section_ref = section.get("reference") if section else None
-    section_line = (
-        f"- Section: {section_name} ({section_ref})"
-        if section_name
-        else ""
-    )
-    lines = [
-        "Ready to run.",
-        f"- Scenario: {scenario}",
-        f"- Length: {values['length_m']} {values.get('length_unit', DEFAULT_INPUT_LENGTH_UNIT)} | Elements: {values['n_elems']}",
-        f"- Load: {values['FY']} {values.get('force_unit', DEFAULT_INPUT_FORCE_UNIT)}",
-    ]
-    if values.get("HY") is not None or values.get("HZ") is not None:
-        lines.append(
-            f"- HY/HZ: {values.get('HY')} {values.get('hy_unit', DEFAULT_INPUT_LENGTH_UNIT)} / "
-            f"{values.get('HZ')} {values.get('hz_unit', DEFAULT_INPUT_LENGTH_UNIT)}"
-        )
-    if material_line:
-        lines.append(material_line)
-    if section_line:
-        lines.append(section_line)
-    if resolution["notes"]:
-        lines.extend(f"- Note: {note}" for note in resolution["notes"])
-    lines.append("Reply: yes")
-    return "\n".join(lines)
-
-
-def build_pipeline_kwargs_from_sheet(sheet: ParameterSheet) -> dict[str, Any]:
-    values = resolve_analysis_inputs(sheet.to_dict())["resolved"]
-    return {
-        "scenario": get_sheet_scenario(sheet),
-        "length_m": values["length_m"],
-        "n_elems": values["n_elems"],
-        "E": values["E"],
-        "NU": values["NU"],
-        "RHO": values["RHO"],
-        "HY": values.get("HY"),
-        "HZ": values.get("HZ"),
-        "A_mm2": values["A_mm2"],
-        "IY_mm4": values["IY_mm4"],
-        "IZ_mm4": values["IZ_mm4"],
-        "JX_mm4": values["JX_mm4"],
-        "AY_mm2": values["AY_mm2"],
-        "AZ_mm2": values["AZ_mm2"],
-        "FY": values["FY"],
-        "length_unit": values.get("length_unit", DEFAULT_INPUT_LENGTH_UNIT),
-        "hy_unit": values.get("hy_unit", DEFAULT_INPUT_LENGTH_UNIT),
-        "hz_unit": values.get("hz_unit", DEFAULT_INPUT_LENGTH_UNIT),
-        "force_unit": values.get("force_unit", DEFAULT_INPUT_FORCE_UNIT),
-        "confirm": True,
-    }
-
-
-def build_catalog_family_guidance(sheet: ParameterSheet) -> str | None:
-    values = sheet.to_dict()
-    resolution = sheet.resolved_state()
-    lines: list[str] = []
-
-    material_hint = values.get("material_hint")
-    if material_hint and not resolution["resolved"].get("resolved_material"):
-        try:
-            material_family = resolve_material_family_name(str(material_hint))
-            material_options = list_materials(material_family)
-            shown = material_options[:8]
-            lines.append(
-                f"For `{material_family}` materials in the local Eurocode-based database, available options are:"
-            )
-            lines.extend(f"- {item}" for item in shown)
-            if len(material_options) > len(shown):
-                lines.append("- ...")
-            lines.append("Choose one, or provide `E`, `NU`, and `RHO`.")
-        except Exception:
-            pass
-
-    section_hint = values.get("section_hint")
-    if section_hint and not resolution["resolved"].get("resolved_section"):
-        try:
-            section_family = resolve_section_family_name(str(section_hint))
-            if section_family == "parametric":
-                lines.append(
-                    "For the section, you can use a parametric `rectangle` or `circle` and provide the dimensions."
-                )
-            else:
-                section_options = list_sections(section_family)
-                shown = section_options[:8]
-                lines.append(
-                    f"For `{section_family}` sections in the local database, available options are:"
-                )
-                lines.extend(f"- {item}" for item in shown)
-                if len(section_options) > len(shown):
-                    lines.append("- ...")
-                lines.append("Choose one, or provide your own section properties/dimensions.")
-        except Exception:
-            pass
-
-    return "\n".join(lines) if lines else None
 
 
 def build_agent() -> AgentExecutor:
@@ -1452,14 +996,8 @@ def build_agent() -> AgentExecutor:
         max_tokens=800,
     )
 
-    # Expose catalog-assistance tools and keep final execution behind the
-    # guarded high-level pipeline tool.
+    # Expose only the high-level deterministic execution tool.
     tools = [
-        list_material_catalog_tool,
-        get_material_catalog_tool,
-        list_section_catalog_tool,
-        get_section_catalog_tool,
-        build_parametric_section_catalog_tool,
         run_full_pipeline,  # High-level pipeline tool
     ]
 
@@ -1525,7 +1063,7 @@ def run_agent_one_shot(
     console_print("All geometric dimensions must be provided in meters.")
     console_print("Describe the beam with the values you know, and include units for each dimension or load.")
     console_print(
-        "   Examples: scenario cantilever_tip_load, 5 m beam, S355, IPE160, 12 elements, 1.2 kN tip load.\n"
+        "   Example: cantilever beam, 5 m length, 12 elements, E 210e9 Pa, NU 0.3, RHO 7850 kg/m3, HY 0.2 m, HZ 0.1 m, 1.2 kN tip load.\n"
     )
 
     ambiguous_message = get_ambiguous_dimension_message(user_input)
@@ -1556,190 +1094,23 @@ def run_agent_one_shot(
     console_print(result.get("output", result))
 
 
-def run_agent_chat(agent_executor: AgentExecutor, extractor_llm: Any | None = None) -> None:
-    """
-    Full interactive chat mode:
-    - Keeps history between turns.
-    - The LLM can decide to call tools at any step.
-    - The user can exit with: exit, quit, stop, end, finish, cancel.
-    """
-    console_print("\nINTERACTIVE CHAT AGENT MODE")
+def print_agent_input_help() -> None:
+    console_print("\nAGENT MODE INPUT GUIDE\n")
+    console_print("Required core parameters:")
     console_print(
-        "Type 'exit', 'quit', 'stop', 'end', 'finish', or 'cancel' to terminate.\n"
+        "- scenario: cantilever_tip_load or simply_supported_midpoint_load"
     )
+    console_print("- length_m with length_unit (m/cm/mm)")
+    console_print("- n_elems")
+    console_print("- material: E, NU, RHO")
+    console_print("- section: HY/HZ (or A_mm2, IY_mm4, IZ_mm4, JX_mm4, AY_mm2, AZ_mm2)")
+    console_print("- FY with force_unit (N/kN)")
+    console_print("\nExample:")
     console_print(
-        "Supported scenarios: "
-        f"{SCENARIO_CANTILEVER_TIP_LOAD}, {SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD}."
+        'cantilever beam, length 4 m, 25 elements, E 210e9 Pa, NU 0.3, '
+        'RHO 7850 kg/m3, HY 0.2 m, HZ 0.1 m, load 2000 N'
     )
-    console_print("Both supported scenarios can proceed through execution.")
-    console_print("All geometric dimensions must be provided in meters.")
-    console_print("Describe the beam with the values you know, and include units for each dimension or load.")
-    console_print(
-        "   Examples: scenario cantilever_tip_load, 5 m beam, S355, IPE160, 12 elements, 1.2 kN tip load.\n"
-    )
-
-    chat_history: List[BaseMessage] = []
-    parameter_sheet = ParameterSheet()
-    simulation_executed = False
-    last_executed_signature: str | None = None
-    last_run_id: str | None = None
-    verification_prompt_pending = False
-
-    from langchain_core.messages import AIMessage, HumanMessage
-
-    while True:
-        try:
-            user_input = input("You: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            console_print("\nBye!")
-            break
-
-        if is_exit_input(user_input):
-            console_print("\nBye! Chat session terminated.\n")
-            break
-
-        ambiguous_message = get_ambiguous_dimension_message(user_input)
-        if ambiguous_message:
-            console_print("\nAgent:\n" + ambiguous_message + "\n")
-            continue
-
-        # Run the agent with history
-        try:
-            turn_update = parameter_sheet.update_from_text(
-                user_input,
-                llm=extractor_llm,
-            )
-            state_input = build_state_aware_input(
-                user_input,
-                parameter_sheet,
-                turn_update=turn_update,
-            )
-            parsed_update = turn_update.get("applied_updates", {})
-            current_signature = get_sheet_signature(parameter_sheet)
-            if last_executed_signature is not None and current_signature != last_executed_signature:
-                simulation_executed = False
-                verification_prompt_pending = False
-
-            if simulation_executed and verification_prompt_pending and is_confirmation_input(user_input):
-                if not last_run_id:
-                    output_str = "I could not find a completed run to verify yet."
-                else:
-                    output_str = (
-                        run_verification_for_run(last_run_id)
-                        + "\nYou can change parameters for another run, request verification again, or finish the process."
-                    )
-                verification_prompt_pending = False
-                console_print("\nAgent:\n" + output_str + "\n")
-                chat_history.append(HumanMessage(content=user_input))
-                chat_history.append(AIMessage(content=output_str))
-                continue
-
-            if simulation_executed and verification_prompt_pending and is_negative_response(user_input):
-                output_str = "Okay. You can change parameters for another run, request verification later, or finish the process."
-                verification_prompt_pending = False
-                console_print("\nAgent:\n" + output_str + "\n")
-                chat_history.append(HumanMessage(content=user_input))
-                chat_history.append(AIMessage(content=output_str))
-                continue
-
-            if simulation_executed and is_verification_input(user_input):
-                if not last_run_id:
-                    output_str = "I could not find a completed run to verify yet."
-                else:
-                    output_str = (
-                        run_verification_for_run(last_run_id)
-                        + "\nYou can change parameters for another run, request verification again, or finish the process."
-                    )
-                console_print("\nAgent:\n" + output_str + "\n")
-                chat_history.append(HumanMessage(content=user_input))
-                chat_history.append(AIMessage(content=output_str))
-                continue
-
-            if simulation_executed and not parsed_update:
-                output_str = build_post_run_idle_message()
-                console_print("\nAgent:\n" + output_str + "\n")
-                chat_history.append(HumanMessage(content=user_input))
-                chat_history.append(AIMessage(content=output_str))
-                continue
-
-            if simulation_executed and is_confirmation_input(user_input):
-                output_str = build_post_run_message()
-                console_print("\nAgent:\n" + output_str + "\n")
-                chat_history.append(HumanMessage(content=user_input))
-                chat_history.append(AIMessage(content=output_str))
-                continue
-
-            missing_fields = get_missing_fields_for_execution(parameter_sheet)
-
-            if not missing_fields:
-                if is_confirmation_input(user_input):
-                    run_output = str(
-                        run_full_pipeline.invoke(
-                            build_pipeline_kwargs_from_sheet(parameter_sheet)
-                        )
-                    ).strip()
-                    if is_successful_run_output(run_output):
-                        last_run_id, _ = extract_run_id_and_folder(run_output)
-                        output_str = build_post_success_message(run_output)
-                        simulation_executed = True
-                        last_executed_signature = get_sheet_signature(parameter_sheet)
-                        verification_prompt_pending = True
-                    else:
-                        output_str = run_output
-                        simulation_executed = False
-                        verification_prompt_pending = False
-                    console_print("\nAgent:\n" + output_str + "\n")
-                    chat_history.append(HumanMessage(content=user_input))
-                    chat_history.append(AIMessage(content=output_str))
-                    continue
-
-                output_str = build_confirmation_summary(parameter_sheet)
-                console_print("\nAgent:\n" + output_str + "\n")
-                chat_history.append(HumanMessage(content=user_input))
-                chat_history.append(AIMessage(content=output_str))
-                continue
-
-            scenario = get_sheet_scenario(parameter_sheet)
-            if scenario is None:
-                output_str = (
-                    "Please choose the scenario first:\n"
-                    f"- {SCENARIO_CANTILEVER_TIP_LOAD}\n"
-                    f"- {SCENARIO_SIMPLY_SUPPORTED_MIDPOINT_LOAD}"
-                )
-                console_print("\nAgent:\n" + output_str + "\n")
-                chat_history.append(HumanMessage(content=user_input))
-                chat_history.append(AIMessage(content=output_str))
-                continue
-
-            family_guidance = build_catalog_family_guidance(parameter_sheet)
-            if family_guidance:
-                console_print("\nAgent:\n" + family_guidance + "\n")
-                chat_history.append(HumanMessage(content=user_input))
-                chat_history.append(AIMessage(content=family_guidance))
-                continue
-
-            result = agent_executor.invoke(
-                {
-                    "input": state_input,
-                    "chat_history": chat_history,
-                }
-            )
-        except Exception as e:
-            console_print(
-                "\nAgent:\nThe agent could not reach the language model. "
-                "Please check your OPENAI_API_KEY, network access, and local firewall settings."
-            )
-            console_print(f"Details: {e}\n")
-            continue
-
-        output = result.get("output", "")
-        output_str = str(output).strip()
-
-        console_print("\nAgent:\n" + output_str + "\n")
-
-        # Append only user and AI messages to history
-        chat_history.append(HumanMessage(content=user_input))
-        chat_history.append(AIMessage(content=output_str))
+    console_print("")
 
 
 if __name__ == "__main__":
@@ -1748,9 +1119,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--mode",
         type=str,
-        default="chat",
-        choices=["agent", "chat"],
-        help="agent: one-shot NL prompt with tools; chat: interactive agent chat",
+        default="agent",
+        choices=["agent"],
+        help="agent: one-shot NL prompt with tools",
     )
 
     parser.add_argument(
@@ -1771,8 +1142,6 @@ if __name__ == "__main__":
 
     if args.mode == "agent":
         if not args.input:
-            raise ValueError("--input is required in agent mode.")
+            print_agent_input_help()
+            sys.exit(0)
         run_agent_one_shot(agent_executor, args.input, extractor_llm=extractor_llm)
-
-    elif args.mode == "chat":
-        run_agent_chat(agent_executor, extractor_llm=extractor_llm)

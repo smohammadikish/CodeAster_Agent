@@ -1,11 +1,9 @@
-import shutil
+﻿import shutil
 import unittest
 import uuid
 
 from storage import ensure_run_dirs, resolve_workspace_file
-from tools.visualize_tool import (visualize_freebody_tool,
-                                  visualize_mfz_contour_tool,
-                                  visualize_resu_tool, visualize_stress_tool)
+from tools.visualize_tool import visualize_stress_tool
 from units import (DEFAULT_UNIT_POLICY, convert_force, convert_length,
                    convert_moment, normalize_user_params,
                    normalize_user_params_mixed_units)
@@ -68,16 +66,6 @@ class VisualizationUnitTests(unittest.TestCase):
         self.run_id = f"unitviz_{uuid.uuid4().hex[:8]}"
         self.paths = ensure_run_dirs(self.run_id)
 
-        resolve_workspace_file("beam_job.resu", "outputs", self.run_id).write_text(
-            "\n".join(
-                [
-                    " NOEUD                 DX                    DY                    DZ                    DRX                   DRY                   DRZ",
-                    " N1        0.0 0.0 0.0 0.0 0.0 0.0",
-                    " N2        0.0 -5.0E-06 0.0 0.0 0.0 -2.7E-09",
-                ]
-            ),
-            encoding="utf-8",
-        )
         resolve_workspace_file("tab_sie.txt", "outputs", self.run_id).write_text(
             "\n".join(
                 [
@@ -88,65 +76,24 @@ class VisualizationUnitTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        resolve_workspace_file("tab_reac.txt", "outputs", self.run_id).write_text(
-            "\n".join(
-                [
-                    "RESULTAT NOM_CHAM INST NUME_ORDRE NOEUD COOR_X COOR_Y DX DY DZ DRX DRY DRZ",
-                    "res_stat REAC_NODA 0.0 1 N1 0.0 0.0 0.0 1000.0 0.0 0.0 0.0 3000000.0",
-                ]
-            ),
-            encoding="utf-8",
-        )
-        resolve_workspace_file("model.geo", "inputs", self.run_id).write_text(
-            "\n".join(
-                [
-                    'Point(1) = {0, 0, 0};',
-                    'Point(2) = {3000, 0, 0};',
-                ]
-            ),
-            encoding="utf-8",
-        )
-        resolve_workspace_file("model.comm", "inputs", self.run_id).write_text(
-            "FORCE_NODALE=_F(GROUP_NO=('TIP',), FY=-1500.0);",
-            encoding="utf-8",
-        )
 
     def tearDown(self) -> None:
         if self.paths.root.exists():
             shutil.rmtree(self.paths.root)
 
-    def test_visualizations_use_centralized_units(self) -> None:
-        resu_result = visualize_resu_tool.invoke(
-            {"resu_name": "beam_job.resu", "run_id": self.run_id}
-        )
+    def test_visualizations_keep_only_shear_and_moment(self) -> None:
         stress_result = visualize_stress_tool.invoke(
             {"stress_name": "tab_sie.txt", "run_id": self.run_id}
         )
-        contour_result = visualize_mfz_contour_tool.invoke(
-            {"stress_name": "tab_sie.txt", "run_id": self.run_id}
-        )
-        freebody_result = visualize_freebody_tool.invoke(
-            {
-                "reac_name": "tab_reac.txt",
-                "geo_name": "model.geo",
-                "comm_name": "model.comm",
-                "run_id": self.run_id,
-            }
-        )
 
-        self.assertIn(DEFAULT_UNIT_POLICY.visualization_displacement_unit, resu_result)
         self.assertIn(DEFAULT_UNIT_POLICY.visualization_force_unit, stress_result)
         self.assertIn(DEFAULT_UNIT_POLICY.visualization_moment_unit, stress_result)
-        self.assertIn(DEFAULT_UNIT_POLICY.visualization_moment_unit, contour_result)
-        self.assertIn(DEFAULT_UNIT_POLICY.visualization_length_unit, contour_result)
-        self.assertIn(DEFAULT_UNIT_POLICY.visualization_force_unit, freebody_result)
-        self.assertIn(DEFAULT_UNIT_POLICY.visualization_moment_unit, freebody_result)
-        self.assertTrue((self.paths.viz / "beam_job_def.png").exists())
-        self.assertTrue((self.paths.viz / "beam_job_rot.png").exists())
         self.assertTrue((self.paths.viz / "shear_diagram.png").exists())
         self.assertTrue((self.paths.viz / "moment_diagram.png").exists())
-        self.assertTrue((self.paths.viz / "mfz_contour.png").exists())
-        self.assertTrue((self.paths.viz / "freebody.png").exists())
+        self.assertFalse((self.paths.viz / "beam_job_def.png").exists())
+        self.assertFalse((self.paths.viz / "beam_job_rot.png").exists())
+        self.assertFalse((self.paths.viz / "mfz_contour.png").exists())
+        self.assertFalse((self.paths.viz / "freebody.png").exists())
 
 
 if __name__ == "__main__":

@@ -1,35 +1,21 @@
-import unittest
-from unittest.mock import Mock
+﻿import unittest
+from unittest.mock import Mock, patch
 
 from chat.resolution import resolve_analysis_inputs
 from input_parser import ParameterSheet, build_state_aware_input
-from main_agent import (build_agent, build_catalog_family_guidance,
-                        build_confirmation_summary,
-                        build_pipeline_kwargs_from_sheet,
-                        build_post_run_idle_message, build_post_run_message,
-                        build_post_success_message, build_system_prompt,
-                        extract_scenario_from_text, get_sheet_signature,
-                        is_exit_input, run_agent_one_shot, run_full_pipeline)
+from main_agent import (build_agent, build_system_prompt,
+                        extract_scenario_from_text, is_exit_input,
+                        run_agent_one_shot, run_full_pipeline)
 
 
 class AgentPromptUnitTests(unittest.TestCase):
-    def test_system_prompt_accepts_mixed_user_units(self) -> None:
+    def test_system_prompt_direct_run_and_units(self) -> None:
         prompt = build_system_prompt()
-        self.assertIn("You must accept explicit user units and convert them internally.", prompt)
-        self.assertIn("Do not ask the user to manually convert", prompt)
-        self.assertIn("Keep normal replies compact and guided.", prompt)
-        self.assertIn("Explicitly say they are suggestions from the local database/catalog.", prompt)
-        self.assertIn("resolve it to the closest standard catalog grade such as C25/30", prompt)
-        self.assertIn("calculate the concrete properties directly with the Eurocode formula", prompt)
-        self.assertIn("material, or I can suggest from my Eurocode-based database", prompt)
-        self.assertIn("section, or I can suggest one", prompt)
-        self.assertIn("Never invent catalog suggestions.", prompt)
+        self.assertIn("cantilever_tip_load", prompt)
+        self.assertIn("simply_supported_midpoint_load", prompt)
+        self.assertIn("Never request confirmation before running.", prompt)
         self.assertIn("length_unit", prompt)
-        self.assertIn("hy_unit", prompt)
-        self.assertIn("hz_unit", prompt)
         self.assertIn("force_unit", prompt)
-        self.assertIn("Use list_material_catalog for material lists.", prompt)
-        self.assertIn("Catalog sections return Code_Aster-ready values A, IY, IZ, JX, AY, and AZ.", prompt)
 
     def test_build_agent_exposes_catalog_and_pipeline_tools(self) -> None:
         agent = build_agent()
@@ -41,9 +27,12 @@ class AgentPromptUnitTests(unittest.TestCase):
         self.assertIn("build_parametric_section_catalog", tool_names)
         self.assertIn("run_full_pipeline", tool_names)
 
-    def test_run_full_pipeline_accepts_per_parameter_units(self) -> None:
+    @patch("main_agent.run_hybrid_pipeline_with_run_storage")
+    def test_run_full_pipeline_accepts_per_parameter_units(self, mocked_run) -> None:
+        mocked_run.return_value = "Simulation finished successfully."
         result = run_full_pipeline.invoke(
             {
+                "scenario": "cantilever_tip_load",
                 "length_m": 5.0,
                 "n_elems": 10,
                 "E": 3.0e10,
@@ -56,13 +45,14 @@ class AgentPromptUnitTests(unittest.TestCase):
                 "hy_unit": "cm",
                 "hz_unit": "cm",
                 "force_unit": "kN",
-                "confirm": False,
             }
         )
-        self.assertIn("simulation has NOT been confirmed", result)
+        self.assertIn("Simulation finished successfully.", result)
         self.assertNotIn("Missing required parameters", result)
 
-    def test_cantilever_with_catalog_section_does_not_require_hy_hz(self) -> None:
+    @patch("main_agent.run_hybrid_pipeline_with_run_storage")
+    def test_cantilever_with_catalog_section_does_not_require_hy_hz(self, mocked_run) -> None:
+        mocked_run.return_value = "Simulation finished successfully."
         result = run_full_pipeline.invoke(
             {
                 "scenario": "cantilever_tip_load",
@@ -82,10 +72,9 @@ class AgentPromptUnitTests(unittest.TestCase):
                 "FY": 1.2,
                 "length_unit": "m",
                 "force_unit": "kN",
-                "confirm": False,
             }
         )
-        self.assertIn("simulation has NOT been confirmed", result)
+        self.assertIn("Simulation finished successfully.", result)
         self.assertNotIn("Invalid value for HY", result)
         self.assertNotIn("Invalid value for HZ", result)
 
@@ -106,71 +95,11 @@ class AgentPromptUnitTests(unittest.TestCase):
         self.assertIn("[Deterministic parameter sheet]", called_input)
         self.assertIn('"n_elems": 10', called_input)
 
-    def test_pipeline_kwargs_and_confirmation_summary_from_sheet(self) -> None:
-        sheet = ParameterSheet()
-        build_state_aware_input("analyse a simple beam 4 m c30 concrete beam", sheet)
-        build_state_aware_input("12 elemens/ hight 20 cm, wedth 12 cm / fy 1.3 kn", sheet)
-        kwargs = build_pipeline_kwargs_from_sheet(sheet)
-        summary = build_confirmation_summary(sheet)
-        self.assertEqual(kwargs["length_m"], 4.0)
-        self.assertEqual(kwargs["length_unit"], "m")
-        self.assertEqual(kwargs["hy_unit"], "cm")
-        self.assertEqual(kwargs["hz_unit"], "cm")
-        self.assertEqual(kwargs["force_unit"], "kN")
-        self.assertEqual(kwargs["E"], 33e9)
-        self.assertTrue(kwargs["confirm"])
-        self.assertIn("AY_mm2", kwargs)
-        self.assertIn("AZ_mm2", kwargs)
-        self.assertEqual(kwargs["scenario"], "simply_supported_midpoint_load")
-        self.assertIn("Ready to run.", summary)
-        self.assertIn("- Material: C30/37", summary)
-        self.assertIn("Reply: yes", summary)
-
     def test_exit_detection_handles_farewell_phrases(self) -> None:
         self.assertTrue(is_exit_input("ok bye!"))
         self.assertTrue(is_exit_input("thanks"))
         self.assertTrue(is_exit_input("goodbye"))
         self.assertFalse(is_exit_input("width 12 cm"))
-
-    def test_post_run_message_is_not_a_confirmation_prompt(self) -> None:
-        message = build_post_run_message()
-        self.assertIn("Already run", message)
-        self.assertIn("Change a parameter", message)
-
-    def test_post_success_message_removes_parameter_dump(self) -> None:
-        run_output = (
-            "Simulation finished successfully.\n"
-            "Run ID: 20260408_185800_beam_6e5acb74\n"
-            "Run folder: C:\\test\\run\n\n"
-            "Input units: length=m, HY=m, HZ=cm, force=N\n"
-            "Used parameters:\n"
-            "{...}"
-        )
-        message = build_post_success_message(run_output)
-        self.assertIn("Simulation finished successfully.", message)
-        self.assertIn("Run ID: 20260408_185800_beam_6e5acb74", message)
-        self.assertIn("Run verification too?", message)
-        self.assertNotIn("Input units:", message)
-        self.assertNotIn("Used parameters:", message)
-
-    def test_confirmation_summary_marks_formula_derived_concrete(self) -> None:
-        sheet = ParameterSheet(
-            {
-                "length_m": 5.0,
-                "length_unit": "m",
-                "n_elems": 11,
-                "FY": 1.2,
-                "force_unit": "kN",
-                "material_hint": "C32/40",
-                "section_shape": "rectangle",
-                "HY": 40.0,
-                "hy_unit": "cm",
-                "HZ": 25.0,
-                "hz_unit": "cm",
-            }
-        )
-        summary = build_confirmation_summary(sheet)
-        self.assertIn("calculated by Eurocode formula", summary)
 
     def test_resolution_maps_c25_shorthand_to_catalog_grade(self) -> None:
         resolved = resolve_analysis_inputs({"material_hint": "C25", "length_m": 5.0, "n_elems": 11, "FY": 1.2})
@@ -179,35 +108,6 @@ class AgentPromptUnitTests(unittest.TestCase):
         self.assertFalse(material["derived"])
         self.assertTrue(
             any("Concrete shorthand 'C25' was resolved to catalog grade 'C25/30'." in note for note in resolved["notes"])
-        )
-
-    def test_catalog_family_guidance_lists_real_wood_entries(self) -> None:
-        sheet = ParameterSheet({"material_hint": "wood"})
-        message = build_catalog_family_guidance(sheet)
-        self.assertIsNotNone(message)
-        self.assertIn("C16", message)
-        self.assertIn("C24", message)
-        self.assertIn("GL24h (Glulam)", message)
-
-    def test_catalog_family_guidance_handles_aluminum_typo(self) -> None:
-        sheet = ParameterSheet({"material_hint": "alumium"})
-        message = build_catalog_family_guidance(sheet)
-        self.assertIsNotNone(message)
-        self.assertIn("6061-T6", message)
-        self.assertIn("6082-T6", message)
-
-    def test_rerun_signature_changes_when_sheet_changes(self) -> None:
-        sheet = ParameterSheet()
-        build_state_aware_input("2.35 m beam, 11 elements, hy 0.125 m, hz 10.34 cm, fy 1230 n, c30 concrete", sheet)
-        first_signature = get_sheet_signature(sheet)
-        build_state_aware_input("change fy to 1.234 kn", sheet)
-        second_signature = get_sheet_signature(sheet)
-        self.assertNotEqual(first_signature, second_signature)
-
-    def test_post_run_idle_message_is_short(self) -> None:
-        self.assertEqual(
-            build_post_run_idle_message(),
-            "Change parameters for another run, or finish.",
         )
 
     def test_extract_scenario_from_plain_language(self) -> None:
@@ -219,6 +119,14 @@ class AgentPromptUnitTests(unittest.TestCase):
             extract_scenario_from_text("cantilever beam 3 m, S355, IPE160, 10 elements, 2 kN tip load"),
             "cantilever_tip_load",
         )
+
+    def test_sheet_state_hint_builds(self) -> None:
+        sheet = ParameterSheet()
+        combined = build_state_aware_input(
+            "cantilever beam 4 m, 10 elements, HY 20 cm, HZ 10 cm, C30 concrete, FY 1.2 kN",
+            sheet,
+        )
+        self.assertIn("[Deterministic parameter sheet]", combined)
 
 
 if __name__ == "__main__":
