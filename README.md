@@ -37,11 +37,34 @@ python -m pip install -r requirements.txt
 
 ## Run (CLI)
 
+Run with a one-shot input string:
+
+```powershell
+python .\main_agent.py --mode agent --input "cantilever beam, length 4 m, 25 elements, E 210e9 Pa, NU 0.3, RHO 7850 kg/m3, HY 0.2 m, HZ 0.1 m, load 2000 N"
+```
+
+Alternative explicit scenario format:
+
+```powershell
+python .\main_agent.py --mode agent --input "cantilever_tip_load, length 4 m, n_elems 25, E 210e9 Pa, NU 0.3, RHO 7850 kg/m3, HY 0.2 m, HZ 0.1 m, FY -2000 N"
+```
+
+Show input help:
+
+```powershell
+python .\main_agent.py --mode agent
+```
+
 Input text example:
 
 ```text
 cantilever beam, length 4 m, 25 elements, E 210e9 Pa, NU 0.3, RHO 7850 kg/m3, HY 0.2 m, HZ 0.1 m, load 2000 N
 ```
+
+Important:
+- Do not paste plain input text directly into PowerShell as a separate line.
+- PowerShell will treat it as a shell command and fail with `CommandNotFoundException`.
+- Always pass the request through `--input "..."`.
 
 ## Outputs
 

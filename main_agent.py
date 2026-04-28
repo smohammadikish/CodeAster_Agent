@@ -33,7 +33,10 @@ from tools.geo_generator import generate_geo_tool
 from tools.mesher_gmsh import mesh_with_gmsh_tool
 from tools.run_aster_tool import run_code_aster_tool
 from tools.validators import file_exists
-from tools.visualize_tool import visualize_stress_tool
+from tools.visualize_tool import (visualize_freebody_tool,
+                                  visualize_mfz_contour_tool,
+                                  visualize_resu_tool,
+                                  visualize_stress_tool)
 from units import DEFAULT_UNIT_POLICY, normalize_user_params_mixed_units
 
 # ============================================================
@@ -967,7 +970,25 @@ When calling run_full_pipeline, pass explicit units:
 - force_unit for FY
 
 If a required value is missing, ask only for the missing value. Keep responses compact.
-Never request confirmation before running."""
+Never request confirmation before running.
+
+You can operate in two execution styles:
+1) High-level tool:
+- run_full_pipeline
+2) Manual tool orchestration:
+- generate_geo
+- mesh_with_gmsh
+- generate_comm
+- generate_export
+- run_code_aster
+- visualize_stress / visualize_resu / visualize_mfz_contour / visualize_freebody
+
+For manual orchestration:
+- Keep file names consistent across steps (for example model.geo -> model.med -> model.comm -> model.export).
+- Use the same run_id across all tool calls of the same simulation.
+- Convert geometry to millimeters before calling low-level tools (length_mm, HY_mm, HZ_mm).
+- Use FY_N in Newton for generate_comm and preserve load sign (downward load is negative).
+- If one step fails, diagnose and fix inputs before proceeding to the next step."""
 
 
 def is_exit_input(user_input: str) -> bool:
@@ -996,9 +1017,19 @@ def build_agent() -> AgentExecutor:
         max_tokens=800,
     )
 
-    # Expose only the high-level deterministic execution tool.
+    # Expose both high-level pipeline and low-level toolchain so the agent can
+    # control each simulation step when needed.
     tools = [
-        run_full_pipeline,  # High-level pipeline tool
+        run_full_pipeline,
+        generate_geo_tool,
+        mesh_with_gmsh_tool,
+        generate_comm_tool,
+        generate_export_tool,
+        run_code_aster_tool,
+        visualize_stress_tool,
+        visualize_resu_tool,
+        visualize_mfz_contour_tool,
+        visualize_freebody_tool,
     ]
 
     # Agent prompt
