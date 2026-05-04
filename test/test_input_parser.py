@@ -44,6 +44,15 @@ class InputParserTests(unittest.TestCase):
         parsed = parse_beam_request("cantilever beam 3 m, S355, IPE160, 10 elements, 2 kN tip load")
         self.assertEqual(parsed["scenario"], "cantilever_tip_load")
 
+    def test_parse_explicit_material_properties(self) -> None:
+        parsed = parse_beam_request(
+            "cantilever beam, length 4 m, 25 elements, E 210e9 Pa, NU 0.3, "
+            "RHO 7850 kg/m3, HY 0.2 m, HZ 0.1 m, load 2000 N"
+        )
+        self.assertEqual(parsed["E"], 210e9)
+        self.assertEqual(parsed["NU"], 0.3)
+        self.assertEqual(parsed["RHO"], 7850.0)
+
     def test_build_parser_hint_appends_structured_extraction(self) -> None:
         text = "10 elements, 20 cm height, 12 cm width, 1.2 kN load"
         hinted = build_parser_hint(text)

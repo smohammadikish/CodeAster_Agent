@@ -40,14 +40,30 @@ python -m pip install -r requirements.txt
 Run with a one-shot input string:
 
 ```powershell
-python .\main_agent.py --mode agent --input "cantilever beam, length 4 m, 25 elements, E 210e9 Pa, NU 0.3, RHO 7850 kg/m3, HY 0.2 m, HZ 0.1 m, load 2000 N"
+python .\main_agent.py --mode agent --input "cantilever beam, length 4 m, 25 elements, E 210e9 Pa, NU 0.3, RHO 7850 kg/m3, HY 200 mm, HZ 100 mm, load 2000 N"
 ```
 
 Alternative explicit scenario format:
 
 ```powershell
-python .\main_agent.py --mode agent --input "cantilever_tip_load, length 4 m, n_elems 25, E 210e9 Pa, NU 0.3, RHO 7850 kg/m3, HY 0.2 m, HZ 0.1 m, FY -2000 N"
+python .\main_agent.py --mode agent --input "cantilever_tip_load, length 4 m, n_elems 25, E 210e9 Pa, NU 0.3, RHO 7850 kg/m3, HY 200 mm, HZ 100 mm, FY -2000 N"
 ```
+
+Simply supported beam with a midpoint load:
+
+```powershell
+python .\main_agent.py --mode agent --input "simply supported beam, length 4 m, 24 elements, E 210e9 Pa, NU 0.3, RHO 7850 kg/m3, HY 200 mm, HZ 100 mm, load 2000 N"
+```
+
+Alternative explicit scenario format:
+
+```powershell
+python .\main_agent.py --mode agent --input "simply_supported_midpoint_load, length 4 m, n_elems 24, E 210e9 Pa, NU 0.3, RHO 7850 kg/m3, HY 200 mm, HZ 100 mm, FY -2000 N"
+```
+
+Important for simply supported beams:
+- Use an even number of elements so the mesh has a midpoint node.
+- The point load is applied at midspan.
 
 Show input help:
 

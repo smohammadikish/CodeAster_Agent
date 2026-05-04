@@ -150,6 +150,16 @@ def parse_beam_request(text: str) -> dict[str, object]:
             parsed["force_unit"] = _normalize_force_unit(match.group("unit"))
             break
 
+    material_property_patterns = {
+        "E": rf"\bE\s*[:=]?\s*(?P<value>{NUMBER}(?:[eE][-+]?\d+)?)\s*(?:Pa)?\b",
+        "NU": rf"\bNU\s*[:=]?\s*(?P<value>{NUMBER}(?:[eE][-+]?\d+)?)\b",
+        "RHO": rf"\bRHO\s*[:=]?\s*(?P<value>{NUMBER}(?:[eE][-+]?\d+)?)\s*(?:kg\s*/?\s*m\^?3|kg\s*/?\s*m3)?\b",
+    }
+    for key, pattern in material_property_patterns.items():
+        match = re.search(pattern, text, flags=re.I)
+        if match:
+            parsed[key] = _to_float(match.group("value"))
+
     material_hint = _find_material_hint(text)
     if material_hint:
         parsed["material_hint"] = material_hint
