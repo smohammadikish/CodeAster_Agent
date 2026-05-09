@@ -35,7 +35,7 @@ model = AFFE_MODELE(
   AFFE=_F(
     GROUP_MA=('BEAM',),
     PHENOMENE='MECANIQUE',
-    MODELISATION='POU_D_T'
+    MODELISATION='POU_D_E'
   )
 );
 

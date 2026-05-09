@@ -427,22 +427,6 @@ def generate_comparison_report(
             poor += 1
 
     report.append("\n" + "=" * 80)
-    report.append("4. METHOD AND FORMULATION NOTES")
-    report.append("=" * 80)
-    report.append(
-        "Code_Aster uses POU_D_T beam elements (Timoshenko-type behavior with shear deformation)."
-    )
-    report.append(
-        "OpenSees uses elasticBeamColumn in the current workflow (Euler-Bernoulli formulation)."
-    )
-    report.append(
-        "Manual solver uses closed-form statically determinate beam equations (Euler-Bernoulli assumptions)."
-    )
-    report.append(
-        "Small support moments near machine precision (around 1e-12) are numerical noise and can be treated as zero."
-    )
-
-    report.append("\n" + "=" * 80)
     report.append("5. ANALYSIS SUMMARY")
     report.append("=" * 80)
     report.append("\nComparison Statistics:")
@@ -467,6 +451,9 @@ def generate_comparison_report(
         )
     else:
         report.append("  No quantitative data available for statistical summary.")
+    report.append(
+        "\nLLM task: Based on this comparison report, write a short summary (3-5 lines)."
+    )
 
     report.append("\n" + "=" * 80)
     report.append("END OF COMPARISON REPORT")

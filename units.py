@@ -29,7 +29,7 @@ class UnitPolicy:
     solver_force_unit: str = "N"
     solver_coordinate_unit: str = "mm"
     solver_moment_unit: str = "Nmm"
-    solver_displacement_unit: str = "m"
+    solver_displacement_unit: str = "mm"
     visualization_length_unit: str = "m"
     visualization_displacement_unit: str = "mm"
     visualization_force_unit: str = "kN"

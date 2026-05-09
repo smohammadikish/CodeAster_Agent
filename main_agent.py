@@ -426,27 +426,27 @@ def run_hybrid_pipeline(params: Dict[str, Any]) -> str:
     Run the full deterministic simulation pipeline.
 
     INPUT:
-    - params: dictionary where geometry is in meters (length_m, HY, HZ)
-      and load FY is in Newtons (user-level units).
+    - params: dictionary where geometry/load values are in user units
+      (default: meters for geometry, Newtons for force).
 
     INTERNAL:
-    - This function converts all geometry from meters to millimeters BEFORE
-      calling the tools, because all tools are implemented in millimeters.
+    - This function converts geometry/load values to solver units (mm, N)
+      before calling tools, because the Code_Aster input toolchain is mm/N.
     """
     console_print("\nStarting deterministic simulation pipeline...\n")
 
     # -------------------------------------------------
     # Unit conversion: meters → millimeters for tools
     # -------------------------------------------------
-    # We keep a local copy so logging and prints remain consistent.
-    p = dict(params)
-
-    # Convert geometric dimensions from meters to millimeters
-    p["length_m"] = p["length_m"] * 1000.0
-    if p.get("HY") is not None:
-        p["HY"] = p["HY"] * 1000.0
-    if p.get("HZ") is not None:
-        p["HZ"] = p["HZ"] * 1000.0
+    # Keep one centralized conversion path to avoid accidental re-scaling.
+    p = normalize_user_params_mixed_units(
+        dict(params),
+        DEFAULT_UNIT_POLICY,
+        length_unit=DEFAULT_INPUT_LENGTH_UNIT,
+        hy_unit=DEFAULT_INPUT_LENGTH_UNIT,
+        hz_unit=DEFAULT_INPUT_LENGTH_UNIT,
+        force_unit=DEFAULT_INPUT_FORCE_UNIT,
+    )
 
     # Ensure load FY is negative (downward) unless user explicitly gave negative
     if p["FY"] > 0:

@@ -19,7 +19,14 @@ FIG_DPI = 260
 FORCED_DISP_UNIT = "mm"
 
 
-def _apply_plot_style(ax, title: str, xlabel: str, ylabel: str, show_zero: bool = True) -> None:
+def _apply_plot_style(
+    ax,
+    title: str,
+    xlabel: str,
+    ylabel: str,
+    show_zero: bool = True,
+    y_axis_at_x_zero: bool = False,
+) -> None:
     ax.set_title(title, fontsize=12, fontweight="bold", pad=10)
     ax.set_xlabel(xlabel, fontsize=10)
     ax.set_ylabel(ylabel, fontsize=10)
@@ -30,6 +37,10 @@ def _apply_plot_style(ax, title: str, xlabel: str, ylabel: str, show_zero: bool 
         ax.spines[spine].set_visible(False)
     ax.spines["left"].set_linewidth(1.1)
     ax.spines["bottom"].set_linewidth(1.1)
+    if y_axis_at_x_zero:
+        ax.spines["left"].set_position(("data", 0.0))
+        ax.yaxis.set_ticks_position("left")
+        ax.yaxis.set_label_position("left")
     if show_zero:
         ax.axhline(0.0, color="#444444", linewidth=1.0, alpha=0.8)
 
@@ -650,6 +661,7 @@ def visualize_resu_tool(resu_name: str = "beam_job.resu", run_id: str = "") -> s
         xlabel=f"Beam Axis X [{DEFAULT_UNIT_POLICY.visualization_length_unit}]",
         ylabel=f"Deflection [{FORCED_DISP_UNIT}]",
         show_zero=True,
+        y_axis_at_x_zero=True,
     )
     ax.margins(y=0.22)
     _ensure_zero_in_ylim(ax)
@@ -674,6 +686,7 @@ def visualize_resu_tool(resu_name: str = "beam_job.resu", run_id: str = "") -> s
         xlabel=f"Beam Axis X [{DEFAULT_UNIT_POLICY.visualization_length_unit}]",
         ylabel=f"Rotation [{DEFAULT_UNIT_POLICY.visualization_rotation_unit}]",
         show_zero=True,
+        y_axis_at_x_zero=True,
     )
     ax.margins(y=0.22)
     _ensure_zero_in_ylim(ax)
@@ -771,6 +784,7 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt", run_id: str = "") ->
         xlabel=x_label,
         ylabel=f"VY [{DEFAULT_UNIT_POLICY.visualization_force_unit}]",
         show_zero=True,
+        y_axis_at_x_zero=True,
     )
     _ensure_zero_in_ylim(ax)
 
@@ -788,6 +802,7 @@ def visualize_stress_tool(stress_name: str = "tab_sie.txt", run_id: str = "") ->
         xlabel=x_label,
         ylabel=f"MFZ [{DEFAULT_UNIT_POLICY.visualization_moment_unit}]",
         show_zero=True,
+        y_axis_at_x_zero=True,
     )
     _ensure_zero_in_ylim(ax)
 
