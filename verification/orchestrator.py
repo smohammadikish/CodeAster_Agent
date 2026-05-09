@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,65 @@ from ver_opensees.runner import run_analysis
 from workspace_manager import (create_embedded_verification_workspace,
                                create_run_workspace, save_comparison_report,
                                save_report, save_solver_result)
+
+
+def _load_repo_env() -> None:
+    env_path = ROOT.parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", maxsplit=1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def _inject_llm_summary(comparison_text: str) -> str:
+    marker = "LLM task: Based on this comparison report, write a short summary (3-5 lines)."
+    _load_repo_env()
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+
+    if not api_key:
+        summary_block = (
+            "LLM Short Summary (3-5 lines):\n"
+            "- Unavailable: OPENAI_API_KEY is not configured."
+        )
+        return comparison_text.replace(marker, summary_block)
+
+    try:
+        from langchain_core.messages import HumanMessage, SystemMessage
+        from langchain_openai import ChatOpenAI
+
+        llm = ChatOpenAI(model=model, api_key=api_key, temperature=0)
+        response = llm.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "You summarize structural comparison reports. "
+                        "Return only 3-5 short lines. No bullets, no markdown title."
+                    )
+                ),
+                HumanMessage(
+                    content=(
+                        "Write a short 3-5 line summary based only on this report:\n\n"
+                        + comparison_text
+                    )
+                ),
+            ]
+        )
+        summary_text = str(response.content).strip()
+        if not summary_text:
+            raise ValueError("Empty summary returned by LLM.")
+        summary_block = f"LLM Short Summary (3-5 lines):\n{summary_text}"
+    except Exception as exc:
+        summary_block = f"LLM Short Summary (3-5 lines):\n- Unavailable: {exc}"
+
+    return comparison_text.replace(marker, summary_block)
 
 
 def run_automated_manual(input_path: Path) -> tuple[dict[str, Any], str | None]:
@@ -159,6 +219,7 @@ def run_both_solvers(
                 input_label,
                 code_aster_outputs_dir=code_aster_outputs_dir,
             )
+            comparison = _inject_llm_summary(comparison)
             save_comparison_report(run_dir, comparison)
             print("  [OK]")
         except Exception as exc:

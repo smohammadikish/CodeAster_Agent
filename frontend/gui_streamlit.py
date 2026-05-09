@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
 import re
 import sqlite3
 import sys
@@ -58,6 +59,31 @@ CHART_DISPLAY_NAMES = {
     "shear_diagram.png": "Shear Diagram",
 }
 
+STOP_WORD_PATTERN = re.compile(
+    r"\b(stop|cancel|terminate|end|finish|abort|halt)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _is_stop_request(text: str) -> bool:
+    return bool(STOP_WORD_PATTERN.search((text or "").strip()))
+
+
+def _run_pipeline_worker(payload: dict[str, Any], result_queue: multiprocessing.Queue) -> None:
+    try:
+        output = str(run_full_pipeline.invoke(payload)).strip()
+        result_queue.put({"ok": True, "output": output})
+    except Exception as exc:
+        result_queue.put({"ok": False, "output": f"Run failed: {exc}"})
+
+
+def _run_verification_worker(run_id: str, result_queue: multiprocessing.Queue) -> None:
+    try:
+        output = str(run_verification_for_run(run_id)).strip()
+        result_queue.put({"ok": True, "output": output})
+    except Exception as exc:
+        result_queue.put({"ok": False, "output": f"Verification failed: {exc}"})
+
 
 def _create_workspace_id() -> str:
     stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
@@ -101,6 +127,13 @@ def _ensure_state() -> None:
     if "sidebar_intro_done" not in st.session_state:
         st.session_state.sidebar_intro_done = False
 
+    if "active_run_process" not in st.session_state:
+        st.session_state.active_run_process = None
+    if "active_run_queue" not in st.session_state:
+        st.session_state.active_run_queue = None
+    if "active_run_kind" not in st.session_state:
+        st.session_state.active_run_kind = None
+
 
 @st.cache_resource
 def _get_models():
@@ -121,6 +154,66 @@ def _append_assistant_message(assistant_text: str) -> None:
 def _append_exchange(user_text: str, assistant_text: str) -> None:
     _append_user_message(user_text)
     _append_assistant_message(assistant_text)
+
+
+def _is_background_run_active() -> bool:
+    proc = st.session_state.get("active_run_process")
+    return bool(proc is not None and proc.is_alive())
+
+
+def _clear_background_run_state() -> None:
+    st.session_state.active_run_process = None
+    st.session_state.active_run_queue = None
+    st.session_state.active_run_kind = None
+
+
+def _start_background_simulation(sheet: ParameterSheet) -> None:
+    payload = build_pipeline_kwargs_from_sheet(sheet)
+    result_queue: multiprocessing.Queue = multiprocessing.Queue()
+    proc = multiprocessing.Process(target=_run_pipeline_worker, args=(payload, result_queue))
+    proc.start()
+    st.session_state.active_run_process = proc
+    st.session_state.active_run_queue = result_queue
+    st.session_state.active_run_kind = "simulation"
+
+
+def _start_background_verification(run_id: str) -> None:
+    result_queue: multiprocessing.Queue = multiprocessing.Queue()
+    proc = multiprocessing.Process(target=_run_verification_worker, args=(run_id, result_queue))
+    proc.start()
+    st.session_state.active_run_process = proc
+    st.session_state.active_run_queue = result_queue
+    st.session_state.active_run_kind = "verification"
+
+
+def _stop_background_run() -> bool:
+    proc = st.session_state.get("active_run_process")
+    if proc is None:
+        return False
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(timeout=3)
+    _clear_background_run_state()
+    return True
+
+
+def _poll_background_run_completion() -> str | None:
+    proc = st.session_state.get("active_run_process")
+    if proc is None or proc.is_alive():
+        return None
+
+    output = ""
+    queue_obj = st.session_state.get("active_run_queue")
+    if queue_obj is not None:
+        try:
+            while not queue_obj.empty():
+                item = queue_obj.get_nowait()
+                if isinstance(item, dict):
+                    output = str(item.get("output", "")).strip()
+        except Exception:
+            pass
+    _clear_background_run_state()
+    return output or "Run finished."
 
 
 def _stream_typewriter_text(text: str, delay_seconds: float = 0.02):
@@ -384,6 +477,12 @@ def _process_message(user_text: str, user_already_appended: bool = False) -> Non
         else:
             _append_exchange(text, formatted_text)
 
+    if _is_background_run_active():
+        if _is_stop_request(text):
+            _stop_background_run()
+            _respond("Active run stopped.")
+        return
+
     ambiguous = get_ambiguous_dimension_message(text)
     if ambiguous:
         _respond(ambiguous)
@@ -402,10 +501,9 @@ def _process_message(user_text: str, user_already_appended: bool = False) -> Non
     if st.session_state.simulation_executed and st.session_state.verification_prompt_pending and is_confirmation_input(text):
         if not st.session_state.last_run_id:
             out = "I could not find a completed run to verify yet."
+            _respond(out)
         else:
-            out = run_verification_for_run(st.session_state.last_run_id)
-        st.session_state.verification_prompt_pending = False
-        _respond(out)
+            _start_background_verification(st.session_state.last_run_id)
         return
 
     if st.session_state.simulation_executed and st.session_state.verification_prompt_pending and is_negative_response(text):
@@ -414,12 +512,11 @@ def _process_message(user_text: str, user_already_appended: bool = False) -> Non
         return
 
     if st.session_state.simulation_executed and is_verification_input(text):
-        out = (
-            run_verification_for_run(st.session_state.last_run_id)
-            if st.session_state.last_run_id
-            else "I could not find a completed run to verify yet."
-        )
-        _respond(out)
+        if st.session_state.last_run_id:
+            _start_background_verification(st.session_state.last_run_id)
+        else:
+            out = "I could not find a completed run to verify yet."
+            _respond(out)
         return
 
     if st.session_state.simulation_executed and not parsed_update:
@@ -433,19 +530,7 @@ def _process_message(user_text: str, user_already_appended: bool = False) -> Non
     missing = get_missing_fields_for_execution(sheet)
     if not missing:
         if is_confirmation_input(text):
-            run_output = str(run_full_pipeline.invoke(build_pipeline_kwargs_from_sheet(sheet))).strip()
-            if is_successful_run_output(run_output):
-                st.session_state.last_run_id, _ = extract_run_id_and_folder(run_output)
-                st.session_state.simulation_executed = True
-                st.session_state.last_executed_signature = get_sheet_signature(sheet)
-                st.session_state.verification_prompt_pending = True
-                if st.session_state.last_run_id:
-                    _record_workspace_run(st.session_state.last_run_id)
-                    _record_run_label(st.session_state.last_run_id)
-                out = build_post_success_message(run_output)
-            else:
-                out = run_output
-            _respond(out)
+            _start_background_simulation(sheet)
             return
 
         _respond(build_confirmation_summary(sheet))
@@ -728,6 +813,36 @@ def main() -> None:
                 st.session_state.pending_assistant_typewriter_idx = None
             else:
                 st.write(m["content"])
+
+    completed_output = _poll_background_run_completion()
+    if completed_output is not None:
+        completed_output = completed_output.strip()
+        if is_successful_run_output(completed_output):
+            st.session_state.last_run_id, _ = extract_run_id_and_folder(completed_output)
+            st.session_state.simulation_executed = True
+            st.session_state.last_executed_signature = get_sheet_signature(st.session_state.sheet)
+            st.session_state.verification_prompt_pending = True
+            if st.session_state.last_run_id:
+                _record_workspace_run(st.session_state.last_run_id)
+                _record_run_label(st.session_state.last_run_id)
+            _append_assistant_message(build_post_success_message(completed_output))
+        elif "Verification finished" in completed_output:
+            st.session_state.verification_prompt_pending = False
+            _append_assistant_message(completed_output)
+        else:
+            _append_assistant_message(completed_output)
+        _save_active_workspace_state()
+        st.rerun()
+
+    if _is_background_run_active():
+        cancel_cols = st.columns([1, 6])
+        if cancel_cols[0].button("Cancel Run", key="stop_active_run", type="secondary"):
+            _stop_background_run()
+            _append_assistant_message("Active run stopped.")
+            _save_active_workspace_state()
+            st.rerun()
+        time.sleep(0.6)
+        st.rerun()
 
     with st.form("chat_input_form", clear_on_submit=True):
         input_col, send_col = st.columns([10, 1])
