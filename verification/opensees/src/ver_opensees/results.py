@@ -91,7 +91,7 @@ def _build_canonical_output(
         },
         "section": {
             "A": beam_input.section.area,
-            "Iz": beam_input.section.inertia_z,
+            "Iy": beam_input.section.inertia_z,
         },
         "material": {
             "E": beam_input.material.elastic_modulus,

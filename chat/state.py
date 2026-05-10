@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .extraction import extract_state_update
-from .parsing import MATERIAL_PATTERN, SECTION_PATTERN, parse_beam_request
+from .parsing import (MATERIAL_PATTERN, SECTION_PATTERN, detect_scope_violation,
+                      parse_beam_request)
 from .resolution import resolve_analysis_inputs
 
 # This module keeps the running conversation state and builds helper text
@@ -119,6 +120,10 @@ class ParameterSheet:
 
     def update_from_text(self, text: str, llm: Any | None = None) -> dict[str, Any]:
         self.sanitize_hints()
+        scope_violation = detect_scope_violation(text)
+        if scope_violation:
+            self.values["scope_violation"] = scope_violation
+
         llm_payload: dict[str, Any] | None = None
         llm_updates: dict[str, Any] = {}
         if llm is not None:
@@ -138,6 +143,15 @@ class ParameterSheet:
                 if key not in llm_updates
             }
         )
+
+        if (
+            not scope_violation
+            and fallback_updates.get("scenario") in {
+                "cantilever_tip_load",
+                "simply_supported_midpoint_load",
+            }
+        ):
+            self.values.pop("scope_violation", None)
 
         return {
             "llm_payload": llm_payload,

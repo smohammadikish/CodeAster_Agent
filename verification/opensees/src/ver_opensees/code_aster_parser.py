@@ -56,7 +56,12 @@ def load_code_aster_input(
         ),
         section=BeamSection(
             area=comm_data["section"]["A"] / 1_000_000.0,
-            inertia_z=comm_data["section"]["IZ"] / 1_000_000_000_000.0,
+            inertia_z=comm_data["section"].get("IY", comm_data["section"]["IZ"])
+            / 1_000_000_000_000.0,
+            inertia_y=comm_data["section"].get("IY", None)
+            / 1_000_000_000_000.0
+            if "IY" in comm_data["section"]
+            else None,
         ),
         load=PointLoad(
             load_type="point_force",

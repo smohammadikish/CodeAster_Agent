@@ -82,6 +82,25 @@ def _find_scenario(text: str) -> str | None:
     return None
 
 
+def detect_scope_violation(text: str) -> str | None:
+    unsupported_support_patterns = [
+        r"\bfixed\s*[- ]\s*fixed\b",
+        r"\bboth\s+fixed(?:\s+supports?)?\b",
+        r"\bfixed\s+at\s+both\s+ends\b",
+        r"\bclamped\s*[- ]\s*clamped\b",
+        r"\bboth\s+clamped\b",
+    ]
+    lowered = text.lower()
+    if any(re.search(pattern, lowered, flags=re.I) for pattern in unsupported_support_patterns):
+        return (
+            "This setup is out of scope. The system is designed only for:\n"
+            "- simply_supported_midpoint_load (simply supported beam with a midpoint point load)\n"
+            "- cantilever_tip_load (cantilever beam with a tip point load)\n"
+            "Please choose one of these supported scenarios."
+        )
+    return None
+
+
 def parse_beam_request(text: str) -> dict[str, object]:
     parsed: dict[str, object] = {}
 

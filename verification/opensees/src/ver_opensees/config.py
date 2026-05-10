@@ -81,7 +81,7 @@ def _load_json_input(path: Path) -> tuple[BeamInput, InputSource]:
         ),
         section=BeamSection(
             area=float(section["A"]),
-            inertia_z=float(section["Iz"]),
+            inertia_z=float(section.get("Iy", section["Iz"])),
             inertia_y=_optional_float(section.get("Iy")),
         ),
         load=PointLoad(
@@ -203,7 +203,7 @@ def _validate(beam_input: BeamInput) -> None:
     if beam_input.material.elastic_modulus <= 0:
         raise ValueError("material.E must be greater than zero.")
     if beam_input.section.inertia_z <= 0:
-        raise ValueError("section.Iz must be greater than zero.")
+        raise ValueError("section inertia (Iy/Iz) must be greater than zero.")
     if beam_input.section.inertia_y is not None and beam_input.section.inertia_y <= 0:
         raise ValueError("section.Iy must be greater than zero when provided.")
     if beam_input.load.load_type != "point_force":

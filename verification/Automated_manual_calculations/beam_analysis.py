@@ -1283,7 +1283,7 @@ def _resolve_flexural_rigidity(model: BeamModel) -> tuple[float, str]:
             "beam.material.E must be greater than zero for displacement calculation."
         )
 
-    for inertia_field in ("Iz", "Izz", "Iy", "Ix", "I"):
+    for inertia_field in ("Iy", "Iyy", "Iz", "Izz", "Ix", "I"):
         if inertia_field in model.section:
             second_moment = _as_float(
                 model.section.get(inertia_field), f"beam.section.{inertia_field}"
@@ -1296,7 +1296,7 @@ def _resolve_flexural_rigidity(model: BeamModel) -> tuple[float, str]:
 
     raise ValueError(
         "Displacement calculation requires a positive section inertia. "
-        "Add one of: Iz, Izz, Iy, Ix, or I."
+        "Add one of: Iy, Iyy, Iz, Izz, Ix, or I."
     )
 
 
@@ -1654,8 +1654,10 @@ def _canonical_section(section: dict[str, Any]) -> dict[str, Any]:
                 filtered[key] = float(section[key])
             except (TypeError, ValueError):
                 pass
-    if "A" not in filtered or "Iz" not in filtered:
-        raise ValueError("Canonical output requires section.A and section.Iz.")
+    if "A" not in filtered or ("Iy" not in filtered and "Iz" not in filtered):
+        raise ValueError(
+            "Canonical output requires section.A and either section.Iy or section.Iz."
+        )
     return filtered
 
 

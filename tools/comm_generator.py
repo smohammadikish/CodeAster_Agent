@@ -187,7 +187,7 @@ model = AFFE_MODELE(
   AFFE=_F(
     GROUP_MA=('BEAM',),
     PHENOMENE='MECANIQUE',
-    MODELISATION='POU_D_T'
+    MODELISATION='POU_D_E'
   )
 );
 
@@ -372,13 +372,16 @@ def generate_comm_tool(
         if scenario == "simply_supported_midpoint_load"
         else COMM_TEMPLATE_CANTILEVER
     )
+    # Keep CA/manual/OpenSees consistent on Iy for the active bending response:
+    # with current FY loading convention, Code_Aster uses IZ in the stiffness term.
+    # So we pass Iy into IZ as the active bending inertia.
     content = template.format(
         E=e_n_per_mm2,
         NU=NU,
         RHO=RHO,
         A=A_mm2,
         IY=IY_mm4,
-        IZ=IZ_mm4,
+        IZ=IY_mm4,
         JX=JX_mm4,
         AY=AY_mm2,
         AZ=AZ_mm2,

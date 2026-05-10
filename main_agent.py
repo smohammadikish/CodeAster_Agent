@@ -187,6 +187,11 @@ def get_sheet_scenario(sheet: ParameterSheet) -> str | None:
     return str(scenario) if scenario else None
 
 
+def get_sheet_scope_violation(sheet: ParameterSheet) -> str | None:
+    violation = sheet.to_dict().get("scope_violation")
+    return str(violation) if violation else None
+
+
 def get_missing_fields_for_execution(sheet: ParameterSheet) -> list[str]:
     missing = list(sheet.missing_required_fields())
     if not get_sheet_scenario(sheet):
@@ -1387,6 +1392,10 @@ def get_sheet_signature(sheet: ParameterSheet) -> str:
 
 
 def build_confirmation_summary(sheet: ParameterSheet) -> str:
+    scope_violation = get_sheet_scope_violation(sheet)
+    if scope_violation:
+        return scope_violation
+
     resolution = resolve_analysis_inputs(sheet.to_dict())
     values = resolution["resolved"]
     scenario = get_sheet_scenario(sheet)
@@ -1602,6 +1611,11 @@ def run_agent_one_shot(
     try:
         sheet = ParameterSheet()
         turn_update = sheet.update_from_text(user_input, llm=extractor_llm)
+        scope_violation = get_sheet_scope_violation(sheet)
+        if scope_violation:
+            console_print("\nAgent response:\n")
+            console_print(scope_violation)
+            return
         state_input = build_state_aware_input(
             user_input,
             sheet,
@@ -1684,6 +1698,14 @@ def run_agent_chat(agent_executor: AgentExecutor, extractor_llm: Any | None = No
             if last_executed_signature is not None and current_signature != last_executed_signature:
                 simulation_executed = False
                 verification_prompt_pending = False
+
+            scope_violation = get_sheet_scope_violation(parameter_sheet)
+            if scope_violation:
+                output_str = scope_violation
+                console_print("\nAgent:\n" + output_str + "\n")
+                chat_history.append(HumanMessage(content=user_input))
+                chat_history.append(AIMessage(content=output_str))
+                continue
 
             if simulation_executed and verification_prompt_pending and is_confirmation_input(user_input):
                 if not last_run_id:

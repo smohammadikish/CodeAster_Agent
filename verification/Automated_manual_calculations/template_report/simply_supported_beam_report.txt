@@ -23,13 +23,13 @@ Mmax = {{ extrema.bending_moment.max }} Nm
 6. Beam Deflection
 dmax = (P x L^3) / (48 x E x I)
 E = {{ material.E }} Pa
-I = {{ section.Iz }} m^4
+I = {{ section.Iy }} m^4
 dmax = {{ displacements.midspan.uy }} m
 
 7. Geometric Properties
 Length L = {{ beam.length }} m
 Cross-sectional Area A = {{ section.A }} m^2
-Moment of Inertia (Iz) = {{ section.Iz }} m^4
+Moment of Inertia (Iy) = {{ section.Iy }} m^4
 
 8. Material Properties
 Material: {{ material.name }}
