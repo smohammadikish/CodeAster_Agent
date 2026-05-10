@@ -45,7 +45,7 @@ from main_agent import (
     is_negative_response,
     is_successful_run_output,
     is_verification_input,
-    run_full_pipeline,
+    execute_full_pipeline,
     run_verification_for_run,
 )
 from storage import DB_PATH, RUNS_ROOT, get_registered_run_paths, init_db
@@ -71,7 +71,7 @@ def _is_stop_request(text: str) -> bool:
 
 def _run_pipeline_worker(payload: dict[str, Any], result_queue: multiprocessing.Queue) -> None:
     try:
-        output = str(run_full_pipeline.invoke(payload)).strip()
+        output = str(execute_full_pipeline(**payload, progress_queue=result_queue)).strip()
         result_queue.put({"ok": True, "output": output})
     except Exception as exc:
         result_queue.put({"ok": False, "output": f"Run failed: {exc}"})
@@ -133,6 +133,10 @@ def _ensure_state() -> None:
         st.session_state.active_run_queue = None
     if "active_run_kind" not in st.session_state:
         st.session_state.active_run_kind = None
+    if "active_run_phase" not in st.session_state:
+        st.session_state.active_run_phase = None
+    if "run_ui_locked" not in st.session_state:
+        st.session_state.run_ui_locked = False
 
 
 @st.cache_resource
@@ -161,10 +165,16 @@ def _is_background_run_active() -> bool:
     return bool(proc is not None and proc.is_alive())
 
 
+def _has_background_run() -> bool:
+    return st.session_state.get("active_run_process") is not None
+
+
 def _clear_background_run_state() -> None:
     st.session_state.active_run_process = None
     st.session_state.active_run_queue = None
     st.session_state.active_run_kind = None
+    st.session_state.active_run_phase = None
+    st.session_state.run_ui_locked = False
 
 
 def _start_background_simulation(sheet: ParameterSheet) -> None:
@@ -175,6 +185,8 @@ def _start_background_simulation(sheet: ParameterSheet) -> None:
     st.session_state.active_run_process = proc
     st.session_state.active_run_queue = result_queue
     st.session_state.active_run_kind = "simulation"
+    st.session_state.active_run_phase = "precheck"
+    st.session_state.run_ui_locked = True
 
 
 def _start_background_verification(run_id: str) -> None:
@@ -184,6 +196,24 @@ def _start_background_verification(run_id: str) -> None:
     st.session_state.active_run_process = proc
     st.session_state.active_run_queue = result_queue
     st.session_state.active_run_kind = "verification"
+    st.session_state.active_run_phase = None
+    st.session_state.run_ui_locked = True
+
+
+def _poll_background_run_progress() -> None:
+    queue_obj = st.session_state.get("active_run_queue")
+    if queue_obj is None:
+        return
+    try:
+        while not queue_obj.empty():
+            item = queue_obj.get_nowait()
+            if isinstance(item, dict) and item.get("event") == "phase":
+                st.session_state.active_run_phase = str(item.get("phase") or "").strip() or None
+            else:
+                queue_obj.put(item)
+                break
+    except Exception:
+        pass
 
 
 def _stop_background_run() -> bool:
@@ -834,15 +864,28 @@ def main() -> None:
         _save_active_workspace_state()
         st.rerun()
 
-    if _is_background_run_active():
-        cancel_cols = st.columns([1, 6])
-        if cancel_cols[0].button("Cancel Run", key="stop_active_run", type="secondary"):
-            _stop_background_run()
-            _append_assistant_message("Active run stopped.")
-            _save_active_workspace_state()
+    has_background_run = _has_background_run()
+    run_controls_blocked = has_background_run or bool(st.session_state.get("run_ui_locked", False))
+
+    if has_background_run:
+        _poll_background_run_progress()
+        if _is_background_run_active() and st.session_state.get("active_run_kind") == "simulation":
+            phase = st.session_state.get("active_run_phase")
+            if phase == "precheck":
+                st.caption("checking pre-run requirements and validating inputs. please wait...")
+            elif phase == "execution":
+                st.caption("Running simulation, please wait...")
+            cancel_cols = st.columns([1, 10])
+            if cancel_cols[0].button("cancel", key="stop_active_run", type="secondary"):
+                _stop_background_run()
+                _append_assistant_message("Active run stopped.")
+                _save_active_workspace_state()
+                st.rerun()
+        elif _is_background_run_active() and st.session_state.get("active_run_kind") == "verification":
+            st.caption("Running verification, please wait...")
+        if _is_background_run_active():
+            time.sleep(0.6)
             st.rerun()
-        time.sleep(0.6)
-        st.rerun()
 
     with st.form("chat_input_form", clear_on_submit=True):
         input_col, send_col = st.columns([10, 1])
@@ -872,10 +915,15 @@ def main() -> None:
         st.rerun()
 
     missing_inputs = get_missing_fields_for_execution(st.session_state.sheet)
-    if not missing_inputs and not st.session_state.simulation_executed:
+    if (
+        not missing_inputs
+        and not st.session_state.simulation_executed
+        and not run_controls_blocked
+    ):
         run_cols = st.columns([1, 1, 1])
         if run_cols[1].button("Run (Yes)", key="quick_run_yes", width='stretch'):
-            with st.spinner("Running simulation, please wait..."):
+            st.session_state.run_ui_locked = True
+            with st.spinner("Starting run..."):
                 _process_message("yes")
             _save_active_workspace_state()
             st.rerun()

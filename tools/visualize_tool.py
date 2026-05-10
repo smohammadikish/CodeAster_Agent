@@ -672,6 +672,50 @@ def visualize_resu_tool(resu_name: str = "beam_job.resu", run_id: str = "") -> s
         FORCED_DISP_UNIT,
         color="#1f77b4",
     )
+    span = float(np.max(x_positions) - np.min(x_positions)) if len(x_positions) > 1 else 0.0
+    x_at_max = float(x_positions[int(np.nanargmax(np.abs(dy_display)))]) if len(x_positions) > 0 else 0.0
+    load_case = "cantilever"
+    support_defs = _read_support_groups(resolve_workspace_file("model.comm", "inputs", run_id or None))
+    if support_defs:
+        unique_groups = {s["group"] for s in support_defs}
+        if len(unique_groups) >= 2:
+            load_case = "simply_supported"
+        elif any(s["type"] == "fixed" for s in support_defs):
+            load_case = "cantilever"
+    max_loc_note = "tip controls" if load_case == "cantilever" else "midspan/load-point controls"
+    # Serviceability range by beam type (common engineering practice defaults).
+    if load_case == "cantilever":
+        n_min, n_max = 125.0, 180.0
+        formula_note = "Cantilever: delta_max = F*L^3/(3*E*I)"
+    else:
+        n_min, n_max = 200.0, 360.0
+        formula_note = "Simply supported: delta_max = F*L^3/(48*E*I)"
+    span_disp_unit = convert_length(
+        span,
+        DEFAULT_UNIT_POLICY.visualization_length_unit,
+        FORCED_DISP_UNIT,
+    ) if span > 0.0 else 0.0
+    delta_lim_lo = span_disp_unit / n_max if span_disp_unit > 0.0 else 0.0
+    delta_lim_hi = span_disp_unit / n_min if span_disp_unit > 0.0 else 0.0
+    status_note = (
+        "OK"
+        if delta_lim_lo <= abs(max_disp) <= delta_lim_hi
+        else ("Too flexible" if abs(max_disp) > delta_lim_hi else "Very stiff")
+    )
+    ax.text(
+        0.015,
+        0.97,
+        (
+            f"Limit range: L/{int(n_max)} to L/{int(n_min)} -> "
+            f"delta in [{delta_lim_lo:.3f}, {delta_lim_hi:.3f}] {FORCED_DISP_UNIT}\n"
+            f"Result: max|DY| = {abs(max_disp):.3f} {FORCED_DISP_UNIT} ({status_note})"
+        ),
+        transform=ax.transAxes,
+        va="top",
+        ha="left",
+        fontsize=8.3,
+        bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "edgecolor": "#9aa0a6", "alpha": 0.9},
+    )
 
     def_path = resolve_workspace_file(f"{Path(resu_name).stem}_def.png", "viz", run_id or None)
     fig.tight_layout()

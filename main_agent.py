@@ -875,8 +875,7 @@ def run_hybrid_pipeline_with_run_storage(
 # ============================================================
 
 
-@tool
-def run_full_pipeline(
+def execute_full_pipeline(
     scenario: str = None,
     length_m: float = None,
     n_elems: int = None,
@@ -897,6 +896,7 @@ def run_full_pipeline(
     hz_unit: str = DEFAULT_INPUT_LENGTH_UNIT,
     force_unit: str = DEFAULT_INPUT_FORCE_UNIT,
     confirm: bool = False,
+    progress_queue: Any | None = None,
 ) -> str:
     """
     Run the complete simulation pipeline ONLY after explicit user confirmation.
@@ -917,6 +917,12 @@ def run_full_pipeline(
     - If confirm=False → return a message asking the agent to request confirmation.
     - If all parameters exist AND confirm=True → run the deterministic pipeline.
     """
+
+    if progress_queue is not None:
+        try:
+            progress_queue.put({"event": "phase", "phase": "precheck"})
+        except Exception:
+            pass
 
     if scenario is None:
         return (
@@ -1038,6 +1044,12 @@ def run_full_pipeline(
         + dict_to_pretty_json(params)
     )
 
+    if progress_queue is not None:
+        try:
+            progress_queue.put({"event": "phase", "phase": "execution"})
+        except Exception:
+            pass
+
     summary = run_hybrid_pipeline_with_run_storage(
         params,
         length_unit=length_unit,
@@ -1052,6 +1064,59 @@ def run_full_pipeline(
         f"Input units: length={length_unit}, HY={hy_unit}, HZ={hz_unit}, force={force_unit}\n"
         "Used parameters:\n"
         f"{dict_to_pretty_json(params)}"
+    )
+
+
+@tool
+def run_full_pipeline(
+    scenario: str = None,
+    length_m: float = None,
+    n_elems: int = None,
+    E: float = None,
+    NU: float = None,
+    RHO: float = None,
+    HY: float = None,
+    HZ: float = None,
+    A_mm2: float = None,
+    IY_mm4: float = None,
+    IZ_mm4: float = None,
+    JX_mm4: float = None,
+    AY_mm2: float = None,
+    AZ_mm2: float = None,
+    FY: float = None,
+    length_unit: str = DEFAULT_INPUT_LENGTH_UNIT,
+    hy_unit: str = DEFAULT_INPUT_LENGTH_UNIT,
+    hz_unit: str = DEFAULT_INPUT_LENGTH_UNIT,
+    force_unit: str = DEFAULT_INPUT_FORCE_UNIT,
+    confirm: bool = False,
+) -> str:
+    """
+    LangChain tool wrapper for the full simulation pipeline.
+
+    This keeps the public tool name stable while delegating execution
+    to `execute_full_pipeline`.
+    """
+    return execute_full_pipeline(
+        scenario=scenario,
+        length_m=length_m,
+        n_elems=n_elems,
+        E=E,
+        NU=NU,
+        RHO=RHO,
+        HY=HY,
+        HZ=HZ,
+        A_mm2=A_mm2,
+        IY_mm4=IY_mm4,
+        IZ_mm4=IZ_mm4,
+        JX_mm4=JX_mm4,
+        AY_mm2=AY_mm2,
+        AZ_mm2=AZ_mm2,
+        FY=FY,
+        length_unit=length_unit,
+        hy_unit=hy_unit,
+        hz_unit=hz_unit,
+        force_unit=force_unit,
+        confirm=confirm,
     )
 
 
